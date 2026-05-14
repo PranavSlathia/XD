@@ -6,6 +6,7 @@ by max source authority. Fetches CDX summary and writes a snapshot row.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import signal
 
 from sqlalchemy import text
@@ -16,6 +17,16 @@ from dh.db.engine import session_scope
 from dh.db.models import WaybackSnapshot
 from dh.logging import configure_logging, log
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
+
+
+def _ts_to_date(ts: str | None) -> dt.date | None:
+    """Parse a CDX YYYYMMDDHHMMSS timestamp into a date (or None)."""
+    if not ts or len(ts) < 8:
+        return None
+    try:
+        return dt.date(int(ts[0:4]), int(ts[4:6]), int(ts[6:8]))
+    except ValueError:
+        return None
 
 STALE_AFTER_DAYS = 30
 
@@ -61,8 +72,8 @@ async def _persist(session: AsyncSession, candidate_id: int, cdx: CdxSummary) ->
     session.add(
         WaybackSnapshot(
             candidate_id=candidate_id,
-            first_capture=None,
-            last_capture=None,
+            first_capture=_ts_to_date(cdx.first_capture),
+            last_capture=_ts_to_date(cdx.last_capture),
             capture_count=cdx.capture_count,
             cdx_summary={
                 "first_capture_ts": cdx.first_capture,
