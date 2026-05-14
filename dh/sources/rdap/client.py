@@ -68,7 +68,7 @@ _WHOISJSON_URL = "https://whoisjson.com/api/v1/whois"
 # 1. DNS hint
 # --------------------------------------------------------------------------- #
 
-async def _dns_is_nxdomain(domain: str) -> bool:
+async def dns_is_nxdomain(domain: str) -> bool:
     """Returns True if the domain has NO authoritative NS records.
 
     Tells you the domain is *worth* a paid availability check.
@@ -86,6 +86,10 @@ async def _dns_is_nxdomain(domain: str) -> bool:
     except Exception as e:  # noqa: BLE001
         log.debug("dns.error", domain=domain, error=str(e))
         return False
+
+
+# Back-compat alias (older code referenced the private name).
+_dns_is_nxdomain = dns_is_nxdomain
 
 
 # --------------------------------------------------------------------------- #

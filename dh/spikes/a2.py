@@ -23,7 +23,7 @@ from dh.logging import log
 from dh.sources.github.contents import extract_urls_from_repo
 from dh.sources.github.repos import ExtractedUrl, Repo
 from dh.sources.github.search import sample_high_star_repos
-from dh.sources.rdap.client import AvailabilityResult, check_availability
+from dh.sources.rdap.client import AvailabilityResult, check_availability, dns_is_nxdomain
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
 
 
@@ -40,6 +40,7 @@ class SpikeConfig:
     max_md_files_per_repo: int = 30
     daily_url_cap: int = 50_000
     extract_concurrency: int = 4
+    dns_concurrency: int = 20         # DNS is cheap; high concurrency OK
     rdap_concurrency: int = 4
     top_n_for_report: int = 50
     fetch_wayback_for_top: int = 30
@@ -80,6 +81,8 @@ class SpikeResult:
     repos_with_urls: int = 0
     urls_extracted: int = 0
     distinct_registrable_domains: int = 0
+    domains_dns_checked: int = 0
+    domains_nxdomain: int = 0
     domains_rdap_available: int = 0
     domains_rdap_authoritative: int = 0
     estimated_spend_usd: float = 0.0
@@ -138,6 +141,18 @@ async def _check_domain(
             )
 
 
+async def _dns_check(
+    domain: str, *, sem: asyncio.Semaphore
+) -> tuple[str, bool]:
+    """Returns (domain, is_nxdomain)."""
+    async with sem:
+        try:
+            return domain, await dns_is_nxdomain(domain)
+        except Exception as e:  # noqa: BLE001
+            log.debug("spike.dns.error", domain=domain, error=str(e))
+            return domain, False
+
+
 async def _fetch_wayback(
     domain: str, *, sem: asyncio.Semaphore
 ) -> CdxSummary:
@@ -170,7 +185,9 @@ def render_report(
     lines.append(f"- Repos that yielded URLs: **{result.repos_with_urls}**")
     lines.append(f"- Acceptable URLs extracted (after path/context filter): **{result.urls_extracted}**")
     lines.append(f"- Distinct registrable domains: **{result.distinct_registrable_domains}**")
-    lines.append(f"- Domains RDAP-checked authoritatively: **{result.domains_rdap_authoritative}**")
+    lines.append(f"- Domains DNS-checked: **{result.domains_dns_checked}**")
+    lines.append(f"- Domains with NXDOMAIN (deadness hint, NOT availability): **{result.domains_nxdomain}**")
+    lines.append(f"- Domains RDAP-checked authoritatively (on NXDOMAIN survivors only): **{result.domains_rdap_authoritative}**")
     lines.append(f"- Domains marked **available** by RDAP: **{result.domains_rdap_available}**")
     lines.append(f"- Estimated spend: **${result.estimated_spend_usd:.2f}**")
     lines.append("")
@@ -286,10 +303,36 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
         repos_with_urls=repos_with_urls,
     )
 
-    # Rank candidates BEFORE we spend on RDAP — only check the top.
+    # --- DNS PRE-FILTER (free, fast) over ALL distinct domains ---
+    # We're hunting for DEAD domains: most extracted URLs go to live, popular
+    # destinations (github.com, arxiv.org, …). DNS NXDOMAIN is a cheap signal
+    # that a domain is worth a paid availability check. Live domains are
+    # filtered out here.
+    all_domains = list(rollups.keys())
+    log.info("spike.a2.dns.start", n=len(all_domains))
+    dns_sem = asyncio.Semaphore(cfg.dns_concurrency)
+    dns_results = await asyncio.gather(
+        *(_dns_check(d, sem=dns_sem) for d in all_domains),
+    )
+    nxdomain_set = {d for d, is_nx in dns_results if is_nx}
+    result.domains_dns_checked = len(all_domains)
+    result.domains_nxdomain = len(nxdomain_set)
+    log.info(
+        "spike.a2.dns.done",
+        checked=len(all_domains),
+        nxdomain=len(nxdomain_set),
+    )
+
+    # Now rank ONLY the NXDOMAIN survivors by source authority + diversity.
+    # (Falls back to all domains if zero NXDOMAIN — keeps the report informative
+    #  rather than empty.)
+    survivors = [r for r in rollups.values() if r.domain in nxdomain_set]
+    if not survivors:
+        log.warning("spike.a2.dns.no_survivors", note="ranking all domains as fallback")
+        survivors = list(rollups.values())
     ranked = sorted(
-        rollups.values(),
-        key=lambda c: (c.max_source_authority * c.n_mentions, c.distinct_sources),
+        survivors,
+        key=lambda c: (c.max_source_authority, c.distinct_sources, c.n_mentions),
         reverse=True,
     )
     top = ranked[: cfg.top_n_for_report]
