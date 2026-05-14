@@ -66,6 +66,11 @@ def spike_a2_cmd(
         "--query",
         help="Raw GitHub-search qualifier appended to the query, e.g. 'awesome in:name'.",
     ),
+    persist: bool = typer.Option(
+        True,
+        "--persist/--no-persist",
+        help="Write results to the DB. Default true. Use --no-persist for quick iterations.",
+    ),
     dry_run: bool = typer.Option(
         True,
         help="Skip live external calls (default in scaffold mode).",
@@ -79,6 +84,7 @@ def spike_a2_cmd(
         star_floor=star_floor,
         pushed_before=pushed_before or None,
         extra_query=extra_query or None,
+        persist=persist,
     )
     log.info(
         "spike.a2.start",
@@ -86,6 +92,7 @@ def spike_a2_cmd(
         star_floor=star_floor,
         pushed_before=pushed_before or None,
         extra_query=extra_query or None,
+        persist=persist,
         dry_run=dry_run,
     )
 

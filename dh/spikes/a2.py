@@ -23,6 +23,7 @@ from dh.logging import log
 from dh.sources.github.contents import extract_urls_from_repo
 from dh.sources.github.repos import ExtractedUrl, Repo
 from dh.sources.github.search import sample_high_star_repos
+from dh.persistence.spike import persist_spike_run
 from dh.sources.openpagerank.client import OPRResult, fetch_open_pagerank
 from dh.sources.rdap.client import AvailabilityResult, check_availability, dns_is_nxdomain
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
@@ -45,6 +46,7 @@ class SpikeConfig:
     rdap_concurrency: int = 4
     top_n_for_report: int = 50
     fetch_wayback_for_top: int = 30
+    persist: bool = True
     output_path: Path = field(
         default_factory=lambda: Path("docs/spikes/a2-yield.md")
     )
@@ -417,6 +419,19 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     cfg.output_path.parent.mkdir(parents=True, exist_ok=True)
     result.finished_at = datetime.utcnow()
     cfg.output_path.write_text(render_report(cfg, result, triples, opr_map=opr_map))
+
+    if cfg.persist:
+        try:
+            await persist_spike_run(
+                rollups=rollups,
+                nxdomain_set=nxdomain_set,
+                opr_map=opr_map,
+                top_candidates=top,
+                avail_results=avail_results,
+                wb_map=wb_map,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error("spike.a2.persist.error", error=str(e))
     log.info(
         "spike.a2.done",
         urls=total_urls,
