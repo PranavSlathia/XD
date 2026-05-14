@@ -61,7 +61,7 @@ async def _claim_batch(
         """
     )
     res = await session.execute(
-        sql, {"top_n": top_n, "stale": STALE_AFTER_DAYS, "lim": batch_size}
+        sql, {"top_n": top_n, "stale": str(STALE_AFTER_DAYS), "lim": batch_size}
     )
     return [(row[0], row[1]) for row in res.all()]
 

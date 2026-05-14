@@ -18,6 +18,7 @@ dependencies = [
     # --- DB ---
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
+    "psycopg[binary]>=3.2",       # sync driver — needed by APScheduler SQLAlchemyJobStore
     "pgvector>=0.3.6",
     "alembic>=1.14",
 
