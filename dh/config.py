@@ -62,6 +62,29 @@ class Settings(BaseSettings):
     # --- Premium-ceiling for digest gate (USD) ---
     premium_ceiling_usd: int = 200
 
+    # --- Worker tunables ---
+    a2_n_repos: int = 500
+    a2_star_floor: int = 5000
+    a2_pushed_before: str = ""
+    a2_interval_hours: int = 24
+
+    rdap_batch_size: int = 100
+    rdap_interval_minutes: int = 10
+
+    wayback_batch_size: int = 50
+    wayback_top_n: int = 200
+    wayback_interval_minutes: int = 30
+
+    scoring_batch_size: int = 200
+    scoring_interval_seconds: int = 60
+
+    # --- Sentry / GlitchTip ---
+    sentry_dsn: str = ""
+
+    # --- Notifications ---
+    digest_min_score: int = 70
+    digest_max_items: int = 10
+
     # --- Derived properties ---
 
     @cached_property
