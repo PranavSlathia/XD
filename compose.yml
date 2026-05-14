@@ -90,7 +90,7 @@ services:
       dh-pg:    { condition: service_healthy }
       dh-redis: { condition: service_healthy }
     ports:
-      - "8004:8000"   # Tailscale-only via firewall
+      - "8007:8000"   # 8004 is taken by moc-embedding; Tailscale-only via firewall
     networks: [dh-net]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
