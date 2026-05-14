@@ -1,0 +1,55 @@
+name: Build dh-api image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dh/**'
+      - 'alembic/**'
+      - 'Dockerfile.python'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'compose.yml'
+      - '.github/workflows/build.yml'
+  workflow_dispatch: {}
+
+# Prevent fork PRs (or any non-canonical-repo push) from running on the runner.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'PranavSlathia/XD' && github.event_name != 'pull_request'
+    runs-on: [self-hosted, linux, dh-dell]
+    timeout-minutes: 15
+
+    steps:
+      - name: Sync repo on Dell
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          git fetch --prune origin
+          git reset --hard origin/main
+
+      - name: Build dh-api image
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          docker compose build dh-api
+
+      - name: Restart dh-api if it was already running
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          if docker ps --filter name=^dh-api$ --format '{{.Names}}' | grep -q '^dh-api$'; then
+            docker compose --profile api up -d dh-api
+            echo "dh-api restarted"
+          else
+            echo "dh-api not running; skipping restart (Phase 1+ will bring it up)"
+          fi
+
+      - name: Sanity check (dh-pg still healthy)
+        run: |
+          set -euo pipefail
+          docker exec dh-pg pg_isready -U dh -d dh

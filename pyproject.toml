@@ -26,6 +26,7 @@ dependencies = [
     "tenacity>=9.0",
     "aiolimiter>=1.2",
     "tldextract>=5.1",
+    "dnspython>=2.7",
 
     # --- CLI / workers ---
     "typer>=0.13",
