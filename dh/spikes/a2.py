@@ -12,7 +12,6 @@ Decision gate (PRD §8 Phase 0.5):
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -20,14 +19,13 @@ from pathlib import Path
 import tldextract
 
 from dh.logging import log
+from dh.persistence.spike import persist_spike_run
 from dh.sources.github.contents import extract_urls_from_repo
 from dh.sources.github.repos import ExtractedUrl, Repo
 from dh.sources.github.search import sample_high_star_repos
-from dh.persistence.spike import persist_spike_run
 from dh.sources.openpagerank.client import OPRResult, fetch_open_pagerank
 from dh.sources.rdap.client import AvailabilityResult, check_availability, dns_is_nxdomain
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
-
 
 # --------------------------------------------------------------------------- #
 # Config / result
@@ -122,7 +120,7 @@ async def _extract_repo(
     async with sem:
         try:
             return await extract_urls_from_repo(repo, max_md_files=max_md_files)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("spike.repo.error", repo=repo.full_name, error=str(e))
             return []
 
@@ -133,7 +131,7 @@ async def _check_domain(
     async with sem:
         try:
             return await check_availability(domain)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("spike.rdap.error", domain=domain, error=str(e))
             from dh.sources.rdap.client import AvailabilityResult as _AR
 
@@ -153,7 +151,7 @@ async def _dns_check(
     async with sem:
         try:
             return domain, await dns_is_nxdomain(domain)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.debug("spike.dns.error", domain=domain, error=str(e))
             return domain, False
 
@@ -164,7 +162,7 @@ async def _fetch_wayback(
     async with sem:
         try:
             return await fetch_cdx(domain)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("spike.wayback.error", domain=domain, error=str(e))
             return CdxSummary(domain=domain)
 
@@ -430,7 +428,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
                 avail_results=avail_results,
                 wb_map=wb_map,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.error("spike.a2.persist.error", error=str(e))
     log.info(
         "spike.a2.done",

@@ -30,6 +30,7 @@ from tenacity import (
 
 from dh.config import settings
 from dh.logging import log
+from dh.spend import WHOISJSON_KEY, get_default_cap
 
 AvailabilityStatus = Literal[
     "unknown",
@@ -83,7 +84,7 @@ async def dns_is_nxdomain(domain: str) -> bool:
         return True
     except dns.resolver.NoNameservers:
         return True
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.debug("dns.error", domain=domain, error=str(e))
         return False
 
@@ -241,6 +242,18 @@ async def _whoisjson_query(client: httpx.AsyncClient, domain: str) -> Availabili
             confidence="unknown",
             source="whoisjson",
             raw_response={"reason": "no DH_WHOISJSON_API_KEY configured"},
+        )
+    # Hard daily cap (PRD §5). Tier-down to RDAP-only when exhausted.
+    _, exceeded = await get_default_cap().incr_and_check(
+        WHOISJSON_KEY, settings.whoisjson_daily_cap
+    )
+    if exceeded:
+        return AvailabilityResult(
+            domain=domain,
+            status="unknown",
+            confidence="unknown",
+            source="whoisjson",
+            raw_response={"reason": "whoisjson daily cap exceeded; tiering down"},
         )
     async with _WHOISJSON_LIMITER:
         resp = await client.get(

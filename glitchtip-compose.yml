@@ -1,0 +1,88 @@
+# GlitchTip self-hosted (Sentry-compatible error tracking).
+#
+# Run as a SEPARATE stack from domain-hunter so failures here don't restart dh-*.
+# Bring up manually with:
+#     docker compose -f glitchtip-compose.yml up -d
+#
+# Once running, configure:
+#   1. Create an account/org at http://<dell-tailscale-ip>:8011/
+#   2. Create a project "domain-hunter"
+#   3. Copy the DSN into the Dell .env as DH_SENTRY_DSN=...
+#   4. `docker compose --profile workers restart` to pick it up
+#
+# Storage / paths (mirrors domain-hunter conventions; never touch ~/docker/moc):
+#   /var/data/glitchtip/         — postgres + uploads (host-bind)
+#
+# Resource usage: ~250-400 MB RAM total. Safe on Dell.
+
+networks:
+  gt-net:
+    driver: bridge
+
+volumes:
+  gt-pg-data:
+  gt-redis-data:
+  gt-uploads:
+
+services:
+  gt-pg:
+    image: postgres:16
+    container_name: gt-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: glitchtip
+      POSTGRES_USER: glitchtip
+      POSTGRES_PASSWORD: ${GT_DB_PASSWORD:?must be set}
+    volumes:
+      - gt-pg-data:/var/lib/postgresql/data
+    networks: [gt-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U glitchtip -d glitchtip"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  gt-redis:
+    image: redis:7-alpine
+    container_name: gt-redis
+    restart: unless-stopped
+    volumes:
+      - gt-redis-data:/data
+    networks: [gt-net]
+
+  gt-web:
+    image: glitchtip/glitchtip:latest
+    container_name: gt-web
+    restart: unless-stopped
+    depends_on:
+      gt-pg:    { condition: service_healthy }
+      gt-redis: { condition: service_started }
+    environment:
+      DATABASE_URL: postgres://glitchtip:${GT_DB_PASSWORD}@gt-pg:5432/glitchtip
+      REDIS_URL: redis://gt-redis:6379/0
+      SECRET_KEY: ${GT_SECRET_KEY:?must be set}
+      PORT: "8011"
+      EMAIL_URL: ${GT_EMAIL_URL:-consolemail://}
+      GLITCHTIP_DOMAIN: ${GT_DOMAIN:-http://localhost:8011}
+      DEFAULT_FROM_EMAIL: ${GT_FROM_EMAIL:-glitchtip@localhost}
+    ports:
+      - "8011:8011"
+    volumes:
+      - gt-uploads:/code/uploads
+    networks: [gt-net]
+
+  gt-worker:
+    image: glitchtip/glitchtip:latest
+    container_name: gt-worker
+    restart: unless-stopped
+    depends_on:
+      gt-pg:    { condition: service_healthy }
+      gt-redis: { condition: service_started }
+    command: ["./bin/run-celery-with-beat.sh"]
+    environment:
+      DATABASE_URL: postgres://glitchtip:${GT_DB_PASSWORD}@gt-pg:5432/glitchtip
+      REDIS_URL: redis://gt-redis:6379/0
+      SECRET_KEY: ${GT_SECRET_KEY}
+    volumes:
+      - gt-uploads:/code/uploads
+    networks: [gt-net]

@@ -169,7 +169,7 @@ async def _list_tree(
 
 def _file_priority(path: str) -> int:
     """Lower = higher priority. Used to cap to max_md_files."""
-    base = path.split("/")[-1]
+    base = path.rsplit("/", maxsplit=1)[-1]
     if base in _INTERESTING_PATHS:
         return 0
     head = path.split("/", 1)[0].lower()

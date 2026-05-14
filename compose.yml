@@ -173,6 +173,25 @@ services:
     labels:
       autoheal: "true"
 
+  dh-web:
+    profiles: ["web", "all"]
+    build:
+      context: ./web
+      dockerfile: Dockerfile.web
+    container_name: dh-web
+    restart: unless-stopped
+    environment:
+      PUBLIC_DH_API_BASE_URL: ${PUBLIC_DH_API_BASE_URL:-http://dh-api:8000}
+      NODE_ENV: production
+      PORT: "3000"
+    ports:
+      - "8005:3000"   # Tailscale-only via firewall
+    depends_on:
+      dh-api: { condition: service_healthy }
+    networks: [dh-net]
+    labels:
+      autoheal: "true"
+
   dh-worker-scoring:
     profiles: ["workers", "all"]
     build: { context: ., dockerfile: Dockerfile.python }

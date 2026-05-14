@@ -105,6 +105,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S", "PLR2004"]
+# FastAPI Depends()/Query() must be passed as default values — that's the framework idiom.
+"dh/api/**/*.py" = ["B008"]
 
 # -----------------------------------------------------------------------------
 # basedpyright

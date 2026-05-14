@@ -41,12 +41,12 @@ async def _run(shutdown: asyncio.Event, interval_seconds: float) -> None:
     while not shutdown.is_set():
         try:
             await loop_once()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.error("worker.a2.iter.error", error=str(e))
         # Sleep until interval elapses or shutdown signalled.
         try:
             await asyncio.wait_for(shutdown.wait(), timeout=interval_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
 
 
@@ -78,6 +78,9 @@ async def _amain() -> None:
 
 def main() -> None:
     configure_logging()
+    from dh.observability import setup_sentry
+
+    setup_sentry(service="worker-a2")
     asyncio.run(_amain())
 
 

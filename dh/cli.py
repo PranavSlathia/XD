@@ -138,7 +138,7 @@ def db_check_cmd() -> None:
 
     try:
         asyncio.run(_ping())
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         typer.echo(f"connection error: {e}", err=True)
         raise typer.Exit(code=1) from None
 

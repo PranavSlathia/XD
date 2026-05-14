@@ -13,4 +13,4 @@ from dh.sources.openpagerank.client import (
     fetch_open_pagerank,
 )
 
-__all__ = ["OPRResult", "OPRBatchResult", "fetch_open_pagerank"]
+__all__ = ["OPRBatchResult", "OPRResult", "fetch_open_pagerank"]

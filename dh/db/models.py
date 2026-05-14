@@ -8,7 +8,6 @@ import datetime as dt
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     Boolean,
     Date,
@@ -115,7 +114,7 @@ class Candidate(Base):
     hard_filtered: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     hard_filter_reason: Mapped[str | None] = mapped_column(String(64))
 
-    mentions: Mapped[list["SourceMention"]] = relationship(back_populates="candidate")
+    mentions: Mapped[list[SourceMention]] = relationship(back_populates="candidate")
 
     __table_args__ = (
         Index(
@@ -312,18 +311,18 @@ class Outcome(Base):
 
 
 __all__ = [
-    "Base",
-    "metadata",
-    "Source",
-    "SourceTerms",
-    "Candidate",
-    "SourceMention",
-    "ScoringWeights",
-    "RdapSnapshot",
     "AvailabilityCheck",
-    "HttpObservation",
-    "WaybackSnapshot",
+    "Base",
+    "Candidate",
     "ClassificationRun",
-    "RegistrarQuote",
+    "HttpObservation",
     "Outcome",
+    "RdapSnapshot",
+    "RegistrarQuote",
+    "ScoringWeights",
+    "Source",
+    "SourceMention",
+    "SourceTerms",
+    "WaybackSnapshot",
+    "metadata",
 ]

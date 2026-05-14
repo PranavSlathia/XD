@@ -12,7 +12,6 @@ from dh.sources.github.context import (
     is_acceptable,
 )
 
-
 # Hard-reject cases (operational; must NEVER become a candidate).
 HARD_REJECTS = [
     # dependency files

@@ -45,8 +45,9 @@ def postgres_url() -> AsyncIterator[str]:
 async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
     engine = create_async_engine(postgres_url)
     # Apply Alembic migrations via the public command API.
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     sync_url = postgres_url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
     project_root = Path(__file__).parent.parent
@@ -155,7 +156,6 @@ async def test_persist_is_idempotent(_patched_engine: None) -> None:
     from dh.db.models import Candidate, Source, SourceMention
     from dh.persistence.spike import persist_spike_run
     from dh.sources.github.repos import ExtractedUrl, Repo
-    from dh.sources.openpagerank.client import OPRResult
     from dh.sources.rdap.client import AvailabilityResult
     from dh.spikes.a2 import CandidateRollup
 

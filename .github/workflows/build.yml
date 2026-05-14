@@ -11,6 +11,8 @@ on:
       - 'uv.lock'
       - 'compose.yml'
       - '.github/workflows/build.yml'
+      - 'tests/**'
+      - 'web/**'
   workflow_dispatch: {}
 
 # Prevent fork PRs (or any non-canonical-repo push) from running on the runner.
@@ -19,7 +21,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    if: github.repository == 'PranavSlathia/XD' && github.event_name != 'pull_request'
+    runs-on: [self-hosted, linux, dh-dell]
+    timeout-minutes: 15
+
+    steps:
+      - name: Sync repo on Dell
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          git fetch --prune origin
+          git reset --hard origin/main
+
+      - name: Install dev deps
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          uv sync --extra dev
+
+      - name: Lint
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          uv run ruff check dh tests || true   # baseline has pre-existing PLC0415 lazy-imports; tracked but not gating yet
+
+      - name: Type check
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          uv run basedpyright dh tests || true   # baseline has pre-existing errors; we track but don't gate yet
+
+      - name: Tests (unit)
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          uv run pytest tests/ -q
+
   build:
+    needs: test
     if: github.repository == 'PranavSlathia/XD' && github.event_name != 'pull_request'
     runs-on: [self-hosted, linux, dh-dell]
     timeout-minutes: 15

@@ -13,6 +13,9 @@ from dh.classify.base import (
     WaybackClassification,
     WaybackClassifierInput,
 )
+from dh.config import settings
+from dh.logging import log
+from dh.spend import LLM_CALLS_KEY, get_default_cap
 
 
 class CodexCliClassifier(ClassifierClient):
@@ -26,6 +29,20 @@ class CodexCliClassifier(ClassifierClient):
     async def classify_wayback_history(
         self, input_: WaybackClassifierInput
     ) -> WaybackClassification:
+        # Hard daily cap: tier-down deterministically when budget is exhausted.
+        _, exceeded = await get_default_cap().incr_and_check(
+            LLM_CALLS_KEY, settings.llm_daily_call_cap
+        )
+        if exceeded:
+            log.warning("classify.codex.tier_down", reason="llm_daily_cap")
+            return WaybackClassification(
+                classification="mixed",
+                confidence=0.0,
+                reasoning="llm daily cap exceeded; deterministic skip",
+                model_used=self.model_used,
+                prompt_version=self.prompt_version,
+                cost_micros=0,
+            )
         # TODO: implement after Phase 0.5 yield spike proves the pipeline shape.
         #   - Render prompt from promptfoo/wayback_v0.md
         #   - Pass response_format JSON Schema (derived from WaybackClassification)
