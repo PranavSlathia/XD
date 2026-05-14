@@ -1,0 +1,35 @@
+# Python runtime image for api + workers.
+# Single image, command differs per service (see compose.yml).
+FROM python:3.12-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    UV_LINK_MODE=copy
+
+# uv is the package manager
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        ca-certificates curl git \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL https://astral.sh/uv/install.sh | sh \
+ && cp /root/.local/bin/uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Install deps first for layer caching
+COPY pyproject.toml ./
+RUN uv venv && uv sync --no-install-project
+
+COPY dh ./dh
+COPY alembic.ini ./
+COPY alembic ./alembic
+
+# Bake the project install
+RUN uv sync
+
+# Non-root by default
+RUN useradd -m -u 1000 dh
+USER dh
+
+# Healthcheck per-service is in compose.yml

@@ -1,0 +1,188 @@
+# Docker Compose for Domain Hunter.
+#
+# IMPORTANT: this file is declarative only. Do NOT `docker compose up` until:
+#   1. .env has been filled in (copy from .env.example)
+#   2. Dell ports 5436 (pg) and 6380 (redis) are confirmed free
+#      (existing moc-db is on 5432; we avoid the collision)
+#   3. /var/data/dh/ and /var/backups/dh/ exist on the host (owned by pronav)
+#
+# Confirmed on Dell (100.103.66.92):
+#   - Docker 29.4.3, Compose v5.1.3
+#   - 5436 + 6381 free (6380 is taken by moc-falkordb)
+#   - /var/data/dh and /var/backups/dh created, owned by pronav
+#
+# Profiles let us bring up subsets:
+#   foundation    : pg + redis (Phase 0)
+#   api           : foundation + dh-api  (Phase 1)
+#   workers       : foundation + workers (Phase 1)
+#   all           : everything           (Phase 4+)
+
+networks:
+  dh-net:
+    driver: bridge
+
+volumes:
+  dh-pg-data:
+  dh-redis-data:
+
+services:
+
+  # -------------------------------------------------------------------------
+  # FOUNDATION
+  # -------------------------------------------------------------------------
+
+  dh-pg:
+    profiles: ["foundation", "api", "workers", "all"]
+    image: pgvector/pgvector:pg16
+    container_name: dh-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DH_DB_NAME:-dh}
+      POSTGRES_USER:     ${DH_DB_USER:-dh}
+      POSTGRES_PASSWORD: ${DH_DB_PASSWORD:?must be set in .env}
+    ports:
+      - "5436:5432"   # exposed for direct admin access via Tailscale; not used by other services
+    volumes:
+      - dh-pg-data:/var/lib/postgresql/data
+      - /var/backups/dh:/var/backups/dh   # for pg_dump output
+    networks: [dh-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DH_DB_USER:-dh} -d ${DH_DB_NAME:-dh}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    labels:
+      autoheal: "true"
+
+  dh-redis:
+    profiles: ["foundation", "api", "workers", "all"]
+    image: redis:7-alpine
+    container_name: dh-redis
+    restart: unless-stopped
+    ports:
+      - "6381:6379"   # 6380 is taken by moc-falkordb on this Dell
+    volumes:
+      - dh-redis-data:/data
+    networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    labels:
+      autoheal: "true"
+
+  # -------------------------------------------------------------------------
+  # APPLICATION (Phase 1+)
+  # Declared now so the topology is reviewable; do not bring up until Phase 1.
+  # -------------------------------------------------------------------------
+
+  dh-api:
+    profiles: ["api", "all"]
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: dh-api
+    restart: unless-stopped
+    command: ["uv", "run", "uvicorn", "dh.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    env_file: .env
+    depends_on:
+      dh-pg:    { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    ports:
+      - "8004:8000"   # Tailscale-only via firewall
+    networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      autoheal: "true"
+
+  dh-scheduler:
+    profiles: ["workers", "all"]
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-scheduler
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.scheduler"]
+    env_file: .env
+    depends_on:
+      dh-pg:    { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    labels:
+      autoheal: "true"
+
+  dh-worker-a2:
+    profiles: ["workers", "all"]
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-worker-a2
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.a2"]
+    env_file: .env
+    volumes:
+      - /var/data/dh:/var/data/dh
+    depends_on:
+      dh-pg:    { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    labels:
+      autoheal: "true"
+
+  dh-worker-rdap:
+    profiles: ["workers", "all"]
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-worker-rdap
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.rdap"]
+    env_file: .env
+    depends_on:
+      dh-pg:    { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    labels:
+      autoheal: "true"
+
+  dh-worker-wayback:
+    profiles: ["workers", "all"]
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-worker-wayback
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.wayback"]
+    env_file: .env
+    depends_on:
+      dh-pg:    { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    labels:
+      autoheal: "true"
+
+  dh-worker-classifier:
+    profiles: ["workers", "all"]
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-worker-classifier
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.classifier"]
+    env_file: .env
+    depends_on:
+      dh-pg:    { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    labels:
+      autoheal: "true"
+
+  dh-worker-scoring:
+    profiles: ["workers", "all"]
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-worker-scoring
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.scoring"]
+    env_file: .env
+    depends_on:
+      dh-pg:    { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    labels:
+      autoheal: "true"

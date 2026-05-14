@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.python-version-local
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.basedpyright/
+htmlcov/
+.coverage
+.coverage.*
+
+# uv
+uv.lock
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Data
+/var/data/
+data/
+*.zone.gz
+*.parquet
+
+# Build
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output
+docs/spikes/*-yield.md
+!docs/spikes/.gitkeep
