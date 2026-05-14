@@ -35,6 +35,8 @@ from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
 class SpikeConfig:
     n_repos: int = 500
     star_floor: int = 5000
+    pushed_before: str | None = None  # e.g. "2022-01-01" for link-rot sampling
+    extra_query: str | None = None    # raw GitHub-search qualifier, e.g. "awesome in:name"
     max_md_files_per_repo: int = 30
     daily_url_cap: int = 50_000
     extract_concurrency: int = 4
@@ -232,8 +234,19 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     cfg = cfg or SpikeConfig()
     result = SpikeResult(started_at=datetime.utcnow())
 
-    log.info("spike.a2.sample.start", n=cfg.n_repos, star_floor=cfg.star_floor)
-    repos = await sample_high_star_repos(n=cfg.n_repos, star_floor=cfg.star_floor)
+    log.info(
+        "spike.a2.sample.start",
+        n=cfg.n_repos,
+        star_floor=cfg.star_floor,
+        pushed_before=cfg.pushed_before,
+        extra_query=cfg.extra_query,
+    )
+    repos = await sample_high_star_repos(
+        n=cfg.n_repos,
+        star_floor=cfg.star_floor,
+        pushed_before=cfg.pushed_before,
+        extra_query=cfg.extra_query,
+    )
     result.repos_sampled = len(repos)
     log.info("spike.a2.sample.done", got=len(repos))
 

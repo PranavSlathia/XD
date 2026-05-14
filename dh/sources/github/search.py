@@ -41,11 +41,21 @@ def _headers() -> dict[str, str]:
     wait=wait_exponential(multiplier=2, min=2, max=30),
 )
 async def _search_page(
-    client: httpx.AsyncClient, *, star_floor: int, page: int
+    client: httpx.AsyncClient,
+    *,
+    star_floor: int,
+    page: int,
+    pushed_before: str | None = None,
+    extra_query: str | None = None,
 ) -> tuple[list[Repo], int]:
     async with _LIMITER:
+        q_parts = [f"stars:>={star_floor}", "archived:false"]
+        if pushed_before:
+            q_parts.append(f"pushed:<{pushed_before}")
+        if extra_query:
+            q_parts.append(extra_query)
         params = {
-            "q": f"stars:>={star_floor} archived:false",
+            "q": " ".join(q_parts),
             "sort": "stars",
             "order": "desc",
             "per_page": 100,
@@ -73,9 +83,19 @@ async def _search_page(
 
 
 async def sample_high_star_repos(
-    *, n: int = 500, star_floor: int = 5000
+    *,
+    n: int = 500,
+    star_floor: int = 5000,
+    pushed_before: str | None = None,
+    extra_query: str | None = None,
 ) -> list[Repo]:
-    """Return up to `n` repos with stars >= `star_floor`, sorted by stars desc."""
+    """Return up to `n` repos with stars >= `star_floor`, sorted by stars desc.
+
+    Args:
+        pushed_before: ISO date string; restricts to repos last pushed before this.
+                       Useful for link-rot sampling (e.g. "2022-01-01").
+        extra_query:   Raw GitHub-search qualifier appended to the query.
+    """
     if not settings.github_token:
         log.warning(
             "github.search.no_token",
@@ -86,7 +106,11 @@ async def sample_high_star_repos(
         page = 1
         while len(repos) < n and page <= 10:  # Search API caps at 1000 = 10 pages
             batch, total = await _search_page(
-                client, star_floor=star_floor, page=page
+                client,
+                star_floor=star_floor,
+                page=page,
+                pushed_before=pushed_before,
+                extra_query=extra_query,
             )
             if not batch:
                 break

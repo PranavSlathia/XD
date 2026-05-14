@@ -58,6 +58,14 @@ def discord_smoke_cmd() -> None:
 def spike_a2_cmd(
     n_repos: int = typer.Option(1000, help="How many repos to sample."),
     star_floor: int = typer.Option(5000, help="Minimum star count to consider."),
+    pushed_before: str = typer.Option(
+        "", help="ISO date 'YYYY-MM-DD'. Restrict to repos last pushed before this."
+    ),
+    extra_query: str = typer.Option(
+        "",
+        "--query",
+        help="Raw GitHub-search qualifier appended to the query, e.g. 'awesome in:name'.",
+    ),
     dry_run: bool = typer.Option(
         True,
         help="Skip live external calls (default in scaffold mode).",
@@ -66,8 +74,20 @@ def spike_a2_cmd(
     """Run the Phase 0.5 A2 yield spike."""
     from dh.spikes.a2 import SpikeConfig, run_a2_spike
 
-    cfg = SpikeConfig(n_repos=n_repos, star_floor=star_floor)
-    log.info("spike.a2.start", n_repos=n_repos, star_floor=star_floor, dry_run=dry_run)
+    cfg = SpikeConfig(
+        n_repos=n_repos,
+        star_floor=star_floor,
+        pushed_before=pushed_before or None,
+        extra_query=extra_query or None,
+    )
+    log.info(
+        "spike.a2.start",
+        n_repos=n_repos,
+        star_floor=star_floor,
+        pushed_before=pushed_before or None,
+        extra_query=extra_query or None,
+        dry_run=dry_run,
+    )
 
     if dry_run:
         typer.echo(
