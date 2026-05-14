@@ -45,6 +45,10 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0",
     "opentelemetry-api>=1.28",
     "opentelemetry-sdk>=1.28",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
+    "opentelemetry-instrumentation-httpx>=0.49b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.49b0",
+    "opentelemetry-exporter-otlp>=1.28",
     "sentry-sdk>=2.18",         # GlitchTip-compatible
 ]
 
@@ -55,6 +59,8 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-anyio>=0.0",
+    "pytest-cov>=6.0",
+    "coverage[toml]>=7.6",
     "testcontainers[postgres]>=4.8",
     "polyfactory>=2.18",
     "dirty-equals>=0.8",
@@ -129,4 +135,24 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers -m 'not integration'"
 markers = [
     "integration: tests that need a real Postgres (run via testcontainers)",
+]
+
+[tool.coverage.run]
+source = ["dh"]
+branch = true
+omit = [
+    "dh/__main__.py",
+    "dh/workers/*",          # workers exercised via integration tests later
+    "dh/api/main.py",        # API exercised via integration tests later
+]
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+skip_covered = false
+fail_under = 30              # baseline; ratchet up as we add tests
+exclude_also = [
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]

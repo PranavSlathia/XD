@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # --- Sentry / GlitchTip ---
     sentry_dsn: str = ""
 
+    # --- OpenTelemetry ---
+    # Set to e.g. "http://tempo:4318" or "http://localhost:4318" to enable.
+    # Leave empty for a console exporter only (dev-friendly, low overhead).
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_namespace: str = "domain-hunter"
+
     # --- Notifications ---
     digest_min_score: int = 70
     digest_max_items: int = 10

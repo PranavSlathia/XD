@@ -157,9 +157,10 @@ async def _amain() -> None:
 
 def main() -> None:
     configure_logging()
-    from dh.observability import setup_sentry
+    from dh.observability import setup_sentry, setup_tracing
 
     setup_sentry(service="scheduler")
+    setup_tracing(service="scheduler")
     asyncio.run(_amain())
 
 

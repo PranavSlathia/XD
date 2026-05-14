@@ -44,3 +44,4 @@ Thumbs.db
 # Output
 docs/spikes/*-yield.md
 !docs/spikes/.gitkeep
+.glitchtip.env

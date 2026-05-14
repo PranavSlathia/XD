@@ -47,7 +47,7 @@ from dh.db.models import (
     WaybackSnapshot,
 )
 from dh.logging import configure_logging, log
-from dh.observability import setup_sentry
+from dh.observability import instrument_fastapi, setup_sentry, setup_tracing
 
 DIGEST_CHANNEL = "dh:candidate-events"
 
@@ -56,6 +56,7 @@ DIGEST_CHANNEL = "dh:candidate-events"
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     setup_sentry(service="api")
+    setup_tracing(service="api")
     log.info("api.startup")
     yield
     await get_engine().dispose()
@@ -67,6 +68,7 @@ app = FastAPI(
     default_response_class=ORJSONResponse,
     lifespan=_lifespan,
 )
+instrument_fastapi(app)
 
 # Prometheus exporter — best-effort; safe if dependency is absent.
 try:
