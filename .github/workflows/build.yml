@@ -34,6 +34,18 @@ jobs:
           git fetch --prune origin
           git reset --hard origin/main
 
+      - name: Ensure uv on PATH
+        run: |
+          set -euo pipefail
+          if ! command -v uv >/dev/null 2>&1; then
+            if [ -x "$HOME/.local/bin/uv" ]; then
+              echo "$HOME/.local/bin" >> $GITHUB_PATH
+            else
+              curl -fsSL https://astral.sh/uv/install.sh | sh
+              echo "$HOME/.local/bin" >> $GITHUB_PATH
+            fi
+          fi
+
       - name: Install dev deps
         working-directory: /home/pronav/docker/domain-hunter
         run: |
