@@ -23,6 +23,7 @@ from dh.logging import log
 from dh.sources.github.contents import extract_urls_from_repo
 from dh.sources.github.repos import ExtractedUrl, Repo
 from dh.sources.github.search import sample_high_star_repos
+from dh.sources.openpagerank.client import OPRResult, fetch_open_pagerank
 from dh.sources.rdap.client import AvailabilityResult, check_availability, dns_is_nxdomain
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
 
@@ -83,6 +84,8 @@ class SpikeResult:
     distinct_registrable_domains: int = 0
     domains_dns_checked: int = 0
     domains_nxdomain: int = 0
+    domains_opr_fetched: int = 0
+    domains_with_opr: int = 0
     domains_rdap_available: int = 0
     domains_rdap_authoritative: int = 0
     estimated_spend_usd: float = 0.0
@@ -172,7 +175,10 @@ def render_report(
     cfg: SpikeConfig,
     result: SpikeResult,
     top: list[tuple[CandidateRollup, AvailabilityResult, CdxSummary | None]],
+    *,
+    opr_map: dict[str, OPRResult] | None = None,
 ) -> str:
+    opr_map = opr_map or {}
     lines: list[str] = []
     lines.append("# A2 Phase 0.5 yield spike\n")
     lines.append(
@@ -187,6 +193,8 @@ def render_report(
     lines.append(f"- Distinct registrable domains: **{result.distinct_registrable_domains}**")
     lines.append(f"- Domains DNS-checked: **{result.domains_dns_checked}**")
     lines.append(f"- Domains with NXDOMAIN (deadness hint, NOT availability): **{result.domains_nxdomain}**")
+    lines.append(f"- Domains Open-PageRank-fetched: **{result.domains_opr_fetched}**")
+    lines.append(f"- Domains with OPR > 0 (have real inbound authority): **{result.domains_with_opr}**")
     lines.append(f"- Domains RDAP-checked authoritatively (on NXDOMAIN survivors only): **{result.domains_rdap_authoritative}**")
     lines.append(f"- Domains marked **available** by RDAP: **{result.domains_rdap_available}**")
     lines.append(f"- Estimated spend: **${result.estimated_spend_usd:.2f}**")
@@ -203,10 +211,10 @@ def render_report(
     lines.append("Pass gate: ≥3 buyable+interesting AND ≥1/day projected → proceed to Phase 1 build.")
     lines.append("")
 
-    lines.append("## Top candidates (ranked by max_source_authority × n_mentions)")
+    lines.append("## Top candidates (ranked by Open PageRank, then source authority)")
     lines.append("")
-    lines.append("| # | Domain | Available? | Stars (max) | Mentions | Sources | Wayback | First repo / file |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("| # | Domain | Available? | OPR | Stars (max) | Mentions | Sources | Wayback | First repo / file |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for i, (cand, avail, cdx) in enumerate(top, start=1):
         repo_label = cand.first_repo.full_name
         path = cand.mentions[0].file_path
@@ -219,8 +227,14 @@ def render_report(
         wb_label = "—"
         if cdx and cdx.capture_count:
             wb_label = f"{cdx.capture_count} captures · {cdx.first_capture[:4]}–{cdx.last_capture[:4]}"
+        opr_info = opr_map.get(cand.domain)
+        if opr_info and opr_info.found and opr_info.page_rank_decimal:
+            opr_label = f"{opr_info.page_rank_decimal:.2f}"
+        else:
+            opr_label = "—"
         lines.append(
             f"| {i} | `{_shorten(cand.domain, 40)}` | {avail_label} | "
+            f"{opr_label} | "
             f"{cand.max_source_authority:,} | {cand.n_mentions} | "
             f"{cand.distinct_sources} | {wb_label} | "
             f"`{_shorten(repo_label, 30)}` · `{_shorten(path, 25)}` |"
@@ -323,16 +337,53 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
         nxdomain=len(nxdomain_set),
     )
 
-    # Now rank ONLY the NXDOMAIN survivors by source authority + diversity.
+    # Now rank ONLY the NXDOMAIN survivors.
     # (Falls back to all domains if zero NXDOMAIN — keeps the report informative
     #  rather than empty.)
     survivors = [r for r in rollups.values() if r.domain in nxdomain_set]
     if not survivors:
         log.warning("spike.a2.dns.no_survivors", note="ranking all domains as fallback")
         survivors = list(rollups.values())
+
+    # --- OPEN PAGERANK ENRICHMENT ---
+    # The linking repo's stars are a "who points at this" signal. They do NOT
+    # convey backlink authority to the target domain. For resale, what matters
+    # is the target domain's OWN inbound-link profile. DomCop Open PageRank
+    # is a free, CC-derived 0–10 score — exactly the DA-proxy we need to filter
+    # out domains with no real backlink authority before ranking.
+    log.info("spike.a2.opr.start", n=len(survivors))
+    opr_batch = await fetch_open_pagerank([s.domain for s in survivors])
+    opr_map: dict[str, OPRResult] = {o.domain: o for o in opr_batch.results}
+    domains_with_opr = sum(
+        1
+        for o in opr_batch.results
+        if o.found and (o.page_rank_decimal or 0) > 0
+    )
+    result.domains_opr_fetched = len(opr_batch.results)
+    result.domains_with_opr = domains_with_opr
+    log.info(
+        "spike.a2.opr.done",
+        fetched=len(opr_batch.results),
+        with_pagerank=domains_with_opr,
+    )
+
+    def _opr_score(c: CandidateRollup) -> float:
+        opr = opr_map.get(c.domain)
+        if not opr or not opr.found:
+            return 0.0
+        return float(opr.page_rank_decimal or 0)
+
+    # Rank by (OPR, then source authority, then diversity, then mentions).
+    # OPR is the dominant signal: a domain with OPR=0 is not worth a buy-decision
+    # regardless of how many high-star READMEs mention it.
     ranked = sorted(
         survivors,
-        key=lambda c: (c.max_source_authority, c.distinct_sources, c.n_mentions),
+        key=lambda c: (
+            _opr_score(c),
+            c.max_source_authority,
+            c.distinct_sources,
+            c.n_mentions,
+        ),
         reverse=True,
     )
     top = ranked[: cfg.top_n_for_report]
@@ -365,7 +416,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
 
     cfg.output_path.parent.mkdir(parents=True, exist_ok=True)
     result.finished_at = datetime.utcnow()
-    cfg.output_path.write_text(render_report(cfg, result, triples))
+    cfg.output_path.write_text(render_report(cfg, result, triples, opr_map=opr_map))
     log.info(
         "spike.a2.done",
         urls=total_urls,

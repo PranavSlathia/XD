@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # --- WhoisJSON ---
     whoisjson_api_key: str = ""
 
+    # --- DomCop Open PageRank ---
+    openpagerank_api_key: str = ""
+
     # --- Premium-ceiling for digest gate (USD) ---
     premium_ceiling_usd: int = 200
 
