@@ -78,3 +78,39 @@ def test_composite_components_populated() -> None:
     assert "max_source_authority" in out.components
     assert out.components["open_pagerank_score"] == 40.0
     assert out.components["source_diversity_bonus"] == 60.0
+
+
+def test_availability_score_is_deadness_aware() -> None:
+    dead = compute(
+        EnrichmentInputs(
+            current_status="available", availability_confidence="authoritative"
+        )
+    )
+    assert dead.components["availability_score"] == 100.0
+    # Never authoritatively checked → 0 (cannot be confirmed acquirable).
+    assert compute(EnrichmentInputs()).components["availability_score"] == 0.0
+    # NXDOMAIN-style hint without authoritative confirmation → partial credit.
+    hint = compute(EnrichmentInputs(current_status="available"))
+    assert hint.components["availability_score"] == 35.0
+
+
+def test_available_domain_outranks_live_megadomain() -> None:
+    """Regression guard for lesson #1 at the scoring layer.
+
+    A live mega-domain (e.g. github.com) is never availability-checked, so it
+    must NOT outrank a genuinely available domain even with maximal authority.
+    """
+    live_megadomain = compute(
+        EnrichmentInputs(max_source_authority=10_000_000, distinct_sources=50)
+    )
+    available_modest = compute(
+        EnrichmentInputs(
+            max_source_authority=2_000,
+            distinct_sources=2,
+            current_status="available",
+            availability_confidence="authoritative",
+        )
+    )
+    assert not live_megadomain.hard_filtered
+    assert not available_modest.hard_filtered
+    assert available_modest.composite > live_megadomain.composite

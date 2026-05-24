@@ -48,18 +48,44 @@ class ScoreBreakdown:
     components: dict[str, float]
 
 
-# Default weights match the PRD §4.5 starting weights / scoring_weights v1.
+# Default weights mirror scoring_weights v2 (deadness-aware). Positive weights
+# sum to 1.0 so a perfect candidate tops out near 100. v2 adds availability_score
+# as the dominant signal — a live/never-checked domain (github.com, google.com)
+# scores 0 there and can no longer dominate the ranking. OPR is now actually
+# populated (v1 left it at 0), so backlink authority finally counts.
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "max_source_authority": 0.25,
+    "availability_score": 0.30,
+    "max_source_authority": 0.15,
     "source_diversity_bonus": 0.10,
-    "referring_domains_score": 0.20,
-    "open_pagerank_score": 0.15,
+    "referring_domains_score": 0.10,
+    "open_pagerank_score": 0.20,
     "wayback_clean_score": 0.10,
-    "age_score": 0.10,
+    "age_score": 0.05,
     "spam_penalty": -0.10,
     "tm_risk_penalty": -0.10,
     "reputation_penalty": -0.10,
 }
+
+
+def _availability_score(status: str | None, confidence: str | None) -> float:
+    """Deadness-aware acquirability signal (0-100).
+
+    Confirmed-available / deletion-state domains score top; a domain that is
+    live or has never been authoritatively checked scores 0. This is what keeps
+    live mega-domains off the top of the ranking (deadness-first, lesson #1).
+    """
+    s = (status or "").lower()
+    if confidence == "authoritative":
+        if s in {"available", "pending_delete", "redemption_period"}:
+            return 100.0
+        if s == "expiring_soon":
+            return 60.0
+        return 0.0  # authoritative + registered/other → not acquirable
+    # Non-authoritative hint only (e.g. a DNS NXDOMAIN suggestion) — worth a
+    # little, but not confirmed.
+    if s in {"available", "pending_delete"}:
+        return 35.0
+    return 0.0
 
 
 def _wayback_clean(cls: str | None) -> float:
@@ -138,6 +164,9 @@ def compute(
         age_years = max(0, inputs.current_year - inputs.wayback_first_capture_year)
 
     components: dict[str, float] = {
+        "availability_score": _availability_score(
+            inputs.current_status, inputs.availability_confidence
+        ),
         "max_source_authority": N.normalize_max_source_authority(inputs.max_source_authority),
         "source_diversity_bonus": N.normalize_source_diversity(inputs.distinct_sources),
         "referring_domains_score": N.normalize_referring_domains(inputs.referring_domains),

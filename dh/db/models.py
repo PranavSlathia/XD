@@ -107,6 +107,10 @@ class Candidate(Base):
     )
     current_status: Mapped[str | None] = mapped_column(String(32))
     availability_confidence: Mapped[str | None] = mapped_column(String(16))
+    # Backlink-authority enrichments (written at ingest, consumed by scoring).
+    # NULL until enriched.
+    open_pagerank: Mapped[float | None] = mapped_column(Numeric)     # 0-10 (DomCop OPR)
+    referring_domains: Mapped[int | None] = mapped_column(Integer)   # Phase 2 (Common Crawl)
     composite_score: Mapped[float | None] = mapped_column(Numeric)
     score_version: Mapped[int | None] = mapped_column(
         ForeignKey("scoring_weights.version", ondelete="SET NULL")

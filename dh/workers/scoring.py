@@ -131,8 +131,8 @@ async def _gather_inputs(
     return EnrichmentInputs(
         max_source_authority=max_auth,
         distinct_sources=distinct_sources,
-        referring_domains=0,  # Phase 2 (Common Crawl)
-        open_pagerank=0.0,    # TODO: persist OPR; for now 0
+        referring_domains=int(cand.referring_domains or 0),  # Phase 2 (Common Crawl)
+        open_pagerank=float(cand.open_pagerank or 0.0),
         wayback_classification=wb_class,
         wayback_first_capture_year=first_year,
         current_year=dt.datetime.now(dt.UTC).year,

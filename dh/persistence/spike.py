@@ -197,6 +197,16 @@ async def persist_spike_run(
         # 2. candidates
         cand_id_map = await _upsert_candidates(session, sorted(domain_set))
 
+        # 2b. Open PageRank — persist for every enriched (NXDOMAIN-survivor)
+        # candidate so the scoring worker can use real backlink authority.
+        for domain, opr in opr_map.items():
+            cid = cand_id_map.get(domain)
+            if cid is None or not opr.found or opr.page_rank_decimal is None:
+                continue
+            cand = await session.get(Candidate, cid)
+            if cand is not None:
+                cand.open_pagerank = float(opr.page_rank_decimal)
+
         # 3. source_mentions (resolve foreign-key ids)
         resolved_mentions: list[dict[str, Any]] = []
         for m in mention_rows:
