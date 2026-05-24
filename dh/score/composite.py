@@ -15,6 +15,7 @@ HardFilterReason = Literal[
     "tm_risk",
     "spam_history",
     "not_available",
+    "low_authority",
     "reputation_flag",
     "premium_quote",
 ]
@@ -38,6 +39,9 @@ class EnrichmentInputs:
     premium_ceiling_micros: int = 200_000_000
     current_status: str | None = None
     availability_confidence: str | None = None
+    # Authority floor for digest-eligibility. Only applies when a domain is
+    # confirmed available — see the low_authority hard filter.
+    min_opr_authority: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -48,19 +52,21 @@ class ScoreBreakdown:
     components: dict[str, float]
 
 
-# Default weights mirror scoring_weights v2 (deadness-aware). Positive weights
-# sum to 1.0 so a perfect candidate tops out near 100. v2 adds availability_score
-# as the dominant signal — a live/never-checked domain (github.com, google.com)
-# scores 0 there and can no longer dominate the ranking. OPR is now actually
-# populated (v1 left it at 0), so backlink authority finally counts.
+# Default weights mirror scoring_weights v3 (authority-first). Positive weights
+# sum to 1.0. v3 reflects the dofollow-authority requirement: GitHub README
+# links are rel="nofollow ugc" so max_source_authority is mostly noise and
+# is heavily demoted (0.05). open_pagerank dominates (0.45) because PageRank
+# flows only through followed links — nofollow-only domains naturally score 0.
+# availability_score is a smaller additive (0.15) because the digest already
+# hard-gates on availability_confidence; it doesn't need to dominate the score.
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "availability_score": 0.30,
-    "max_source_authority": 0.15,
-    "source_diversity_bonus": 0.10,
+    "availability_score": 0.15,
+    "max_source_authority": 0.05,
+    "source_diversity_bonus": 0.05,
     "referring_domains_score": 0.10,
-    "open_pagerank_score": 0.20,
+    "open_pagerank_score": 0.45,
     "wayback_clean_score": 0.10,
-    "age_score": 0.05,
+    "age_score": 0.10,
     "spam_penalty": -0.10,
     "tm_risk_penalty": -0.10,
     "reputation_penalty": -0.10,
@@ -146,6 +152,24 @@ def compute(
             composite=0.0,
             hard_filtered=True,
             hard_filter_reason="not_available",
+            components={},
+        )
+    # Authority floor — only fires for *confirmed-available* domains that lack
+    # backlink authority. Live/unchecked domains naturally score low via
+    # availability_score=0; tagging them "low_authority" would be misleading.
+    # Open PageRank inherently weights dofollow (PageRank doesn't flow through
+    # rel=nofollow), so a domain whose only inbound links are nofollow (e.g.
+    # GitHub README citations) sits near zero here — exactly the signal we want.
+    if (
+        inputs.availability_confidence == "authoritative"
+        and (inputs.current_status or "").lower()
+        in {"available", "pending_delete", "redemption_period", "expiring_soon"}
+        and inputs.open_pagerank < inputs.min_opr_authority
+    ):
+        return ScoreBreakdown(
+            composite=0.0,
+            hard_filtered=True,
+            hard_filter_reason="low_authority",
             components={},
         )
     if (

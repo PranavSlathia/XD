@@ -143,6 +143,7 @@ async def _gather_inputs(
         premium_ceiling_micros=settings.premium_ceiling_micros,
         current_status=current_status,
         availability_confidence=availability_confidence,
+        min_opr_authority=float(settings.opr_min_authority),
     )
 
 

@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # --- Premium-ceiling for digest gate (USD) ---
     premium_ceiling_usd: int = 200
 
+    # --- Authority floor (Open PageRank, 0-10) ---
+    # Confirmed-available domains below this OPR are hard-filtered as
+    # 'low_authority'. Encodes the dofollow-authority requirement: PageRank
+    # doesn't flow through rel=nofollow, so OPR is a real authority signal.
+    opr_min_authority: float = 3.0
+
     # --- Worker tunables ---
     a2_n_repos: int = 500
     a2_star_floor: int = 5000
