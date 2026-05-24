@@ -45,7 +45,10 @@ class SpikeConfig:
     top_n_for_report: int = 50
     fetch_wayback_for_top: int = 30
     persist: bool = True
-    output_path: Path = field(
+    # Human-facing markdown report. None disables it — used by the continuous
+    # worker, which only needs DB persistence (the report path isn't writable
+    # in the worker container and is a spike-only artifact).
+    output_path: Path | None = field(
         default_factory=lambda: Path("docs/spikes/a2-yield.md")
     )
 
@@ -414,9 +417,10 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     for cand, avail in zip(top, avail_results, strict=True):
         triples.append((cand, avail, wb_map.get(cand.domain)))
 
-    cfg.output_path.parent.mkdir(parents=True, exist_ok=True)
     result.finished_at = datetime.utcnow()
-    cfg.output_path.write_text(render_report(cfg, result, triples, opr_map=opr_map))
+    if cfg.output_path is not None:
+        cfg.output_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg.output_path.write_text(render_report(cfg, result, triples, opr_map=opr_map))
 
     if cfg.persist:
         try:
@@ -435,7 +439,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
         urls=total_urls,
         domains=len(rollups),
         available=avail_count,
-        report=str(cfg.output_path),
+        report=str(cfg.output_path) if cfg.output_path else None,
         spend_usd=f"{result.estimated_spend_usd:.2f}",
     )
     return result

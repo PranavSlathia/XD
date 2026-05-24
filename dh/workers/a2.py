@@ -24,6 +24,7 @@ def _build_spike_config() -> Any:
         star_floor=settings.a2_star_floor,
         pushed_before=settings.a2_pushed_before or None,
         persist=True,
+        output_path=None,  # continuous worker persists to DB; no markdown artifact
     )
 
 

@@ -40,7 +40,7 @@ async def _claim_batch(session: AsyncSession, *, batch_size: int) -> list[tuple[
         LIMIT :lim
         """
     )
-    res = await session.execute(sql, {"stale": STALE_AFTER_DAYS, "lim": batch_size})
+    res = await session.execute(sql, {"stale": str(STALE_AFTER_DAYS), "lim": batch_size})
     return [(row[0], row[1]) for row in res.all()]
 
 
