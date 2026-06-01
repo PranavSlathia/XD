@@ -51,7 +51,7 @@ services:
     networks: [gt-net]
 
   gt-web:
-    image: glitchtip/glitchtip:latest
+    image: glitchtip/glitchtip@sha256:f45485d296697531464b4484ee9bb40a51a774df820f74128a2b2ae0c5a0b00f
     container_name: gt-web
     restart: unless-stopped
     depends_on:
@@ -66,13 +66,19 @@ services:
       GLITCHTIP_DOMAIN: ${GT_DOMAIN:-http://localhost:8011}
       DEFAULT_FROM_EMAIL: ${GT_FROM_EMAIL:-glitchtip@localhost}
     ports:
-      - "8011:8011"
+      - "100.103.66.92:8011:8011"
     volumes:
       - gt-uploads:/code/uploads
     networks: [gt-net]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8011')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   gt-worker:
-    image: glitchtip/glitchtip:latest
+    image: glitchtip/glitchtip@sha256:f45485d296697531464b4484ee9bb40a51a774df820f74128a2b2ae0c5a0b00f
     container_name: gt-worker
     restart: unless-stopped
     depends_on:

@@ -45,3 +45,9 @@ Thumbs.db
 docs/spikes/*-yield.md
 !docs/spikes/.gitkeep
 .glitchtip.env
+
+# Local backup snapshots (never commit; .env.bak.* contains secrets)
+*.bak
+*.bak.*
+*.bak-*
+.env.bak*

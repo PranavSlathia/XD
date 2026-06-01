@@ -186,10 +186,16 @@ services:
       NODE_ENV: production
       PORT: "3000"
     ports:
-      - "${DH_BIND_ADDR:-127.0.0.1}:8005:3000"   # Tailscale-only via firewall
+      - "127.0.0.1:8005:3000"   # Cloudflare Tunnel reaches this through localhost
     depends_on:
       dh-api: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     labels:
       autoheal: "true"
 
