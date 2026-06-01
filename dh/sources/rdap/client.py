@@ -130,7 +130,9 @@ def _tld_of(domain: str) -> str:
 
 def _epp_to_status(epp_statuses: list[str]) -> AvailabilityStatus:
     """Map RDAP/EPP status codes to our compact status enum."""
-    s = {x.lower() for x in epp_statuses}
+    # str() guards against malformed arrays where an element is itself a
+    # list/dict — never raise AttributeError on `.lower()`.
+    s = {str(x).lower() for x in epp_statuses}
     if "pending delete" in s or "pendingdelete" in s:
         return "pending_delete"
     if "redemption period" in s or "redemptionperiod" in s:
@@ -141,6 +143,47 @@ def _epp_to_status(epp_statuses: list[str]) -> AvailabilityStatus:
         return "server_hold"
     # Anything resolvable + no special flag → registered.
     return "registered"
+
+
+def _coerce_registrar(value: object) -> str | None:
+    """Coerce an RDAP/WhoisJSON registrar field to a clean string or None.
+
+    Registrar arrives as a plain string, an RDAP jCard list, or (WhoisJSON) an
+    object like ``{'id': ..., 'name': 'Webnic', 'email': ..., 'url': ...}``.
+    Anything we can't turn into a non-empty name becomes None — `registrar` on
+    AvailabilityResult is typed `str | None`, so a dict/list would otherwise
+    fail Pydantic validation and sink the whole check.
+    """
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        for key in ("name", "fn"):
+            name = value.get(key)
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+        return None
+    if isinstance(value, list):
+        for item in value:
+            coerced = _coerce_registrar(item)
+            if coerced:
+                return coerced
+        return None
+    return None
+
+
+def _whoisjson_status(data: dict[str, object]) -> str:
+    """Normalise WhoisJSON's ``status`` to a lowercase token.
+
+    Usually ``"available"`` / ``"registered"`` (a string), but some responses
+    return a list of EPP status codes — a non-empty list means the domain is
+    registered. Never raises (the old ``(x or "").lower()`` crashed on a list).
+    """
+    raw = data.get("status")
+    if isinstance(raw, str):
+        return raw.strip().lower()
+    if isinstance(raw, list):
+        return "registered" if raw else ""
+    return ""
 
 
 @retry(
@@ -202,7 +245,7 @@ async def _rdap_query(client: httpx.AsyncClient, domain: str) -> AvailabilityRes
                 if len(vcard) >= 2:
                     for item in vcard[1]:
                         if item and item[0] == "fn" and len(item) >= 4:
-                            registrar = item[3]
+                            registrar = _coerce_registrar(item[3])
                             break
                 break
         return AvailabilityResult(
@@ -281,8 +324,9 @@ async def _whoisjson_query(client: httpx.AsyncClient, domain: str) -> Availabili
             raw_response={"http_status": resp.status_code},
         )
     data = resp.json()
-    # WhoisJSON returns a "status" field: e.g. "registered" / "available"
-    raw_status = (data.get("status") or "").lower()
+    # WhoisJSON returns a "status" field: e.g. "registered" / "available",
+    # or sometimes a list of EPP status codes. Normalise without crashing.
+    raw_status = _whoisjson_status(data)
     if raw_status == "available":
         status: AvailabilityStatus = "available"
     elif raw_status == "registered":
@@ -294,7 +338,7 @@ async def _whoisjson_query(client: httpx.AsyncClient, domain: str) -> Availabili
         status=status,
         confidence="authoritative" if status != "unknown" else "probable",
         source="whoisjson",
-        registrar=data.get("registrar"),
+        registrar=_coerce_registrar(data.get("registrar")),
         expiry_date=data.get("expires") or data.get("expiry_date"),
         api_cost_micros=100,
         raw_response=data,
