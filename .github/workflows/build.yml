@@ -95,7 +95,7 @@ jobs:
         working-directory: /home/pronav/docker/domain-hunter
         run: |
           set -euo pipefail
-          docker compose --profile api run --rm dh-api alembic upgrade head
+          docker compose --profile api run --rm dh-api uv run alembic upgrade head
 
       - name: Restart dh-api if it was already running
         working-directory: /home/pronav/docker/domain-hunter
