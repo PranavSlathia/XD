@@ -1,7 +1,7 @@
 import { fetchJson, type CandidateListItem } from '$lib/api';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ url }) => {
+export const load: PageServerLoad = async ({ url, fetch }) => {
   const params = new URLSearchParams();
   const minScore = url.searchParams.get('min_score');
   const status = url.searchParams.get('status');
@@ -9,7 +9,7 @@ export const load: PageServerLoad = async ({ url }) => {
   if (status) params.set('status', status);
   params.set('limit', '200');
   try {
-    const items = await fetchJson<CandidateListItem[]>(`/api/candidates?${params.toString()}`);
+    const items = await fetchJson<CandidateListItem[]>(`/api/candidates?${params.toString()}`, undefined, fetch);
     return { items, error: null as string | null };
   } catch (e) {
     return { items: [] as CandidateListItem[], error: (e as Error).message };

@@ -69,18 +69,21 @@ async def _gather_digest() -> list[CandidateDigestItem]:
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if (
-                rq
-                and rq.quote_price_micros
-                and rq.quote_price_micros >= settings.premium_ceiling_micros
-            ):
+            if rq is None:
+                continue
+            if rq.is_premium is True:
+                continue
+            if rq.quote_price_micros is None:
+                continue
+            if rq.quote_price_micros >= settings.premium_ceiling_micros:
                 continue
             items.append(
                 CandidateDigestItem(
                     domain=cand.domain,
                     composite_score=float(cand.composite_score) if cand.composite_score else None,
                     current_status=cand.current_status,
-                    quote_price_micros=rq.quote_price_micros if rq else None,
+                    quote_price_micros=rq.quote_price_micros,
+                    top_reasons=cand.top_reasons or [],
                 )
             )
     return items

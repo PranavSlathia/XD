@@ -112,6 +112,8 @@ class Candidate(Base):
     open_pagerank: Mapped[float | None] = mapped_column(Numeric)     # 0-10 (DomCop OPR)
     referring_domains: Mapped[int | None] = mapped_column(Integer)   # Phase 2 (Common Crawl)
     composite_score: Mapped[float | None] = mapped_column(Numeric)
+    score_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    top_reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     score_version: Mapped[int | None] = mapped_column(
         ForeignKey("scoring_weights.version", ondelete="SET NULL")
     )

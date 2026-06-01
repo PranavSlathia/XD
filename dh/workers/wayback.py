@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dh.config import settings
 from dh.db.engine import session_scope
-from dh.db.models import WaybackSnapshot
+from dh.db.models import Candidate, WaybackSnapshot
 from dh.logging import configure_logging, log
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
 
@@ -82,6 +82,9 @@ async def _persist(session: AsyncSession, candidate_id: int, cdx: CdxSummary) ->
             },
         )
     )
+    cand = await session.get(Candidate, candidate_id)
+    if cand is not None:
+        cand.score_version = None
 
 
 async def run_batch(*, batch_size: int, top_n: int, concurrency: int = 4) -> int:

@@ -84,11 +84,12 @@ jobs:
           git fetch --prune origin
           git reset --hard origin/main
 
-      - name: Build dh-api image
+      - name: Build runtime images
         working-directory: /home/pronav/docker/domain-hunter
         run: |
           set -euo pipefail
           docker compose build dh-api
+          docker compose build dh-web
 
       - name: Restart dh-api if it was already running
         working-directory: /home/pronav/docker/domain-hunter
@@ -99,6 +100,17 @@ jobs:
             echo "dh-api restarted"
           else
             echo "dh-api not running; skipping restart (Phase 1+ will bring it up)"
+          fi
+
+      - name: Restart dh-web if it was already running
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          if docker ps --filter name=^dh-web$ --format '{{.Names}}' | grep -q '^dh-web$'; then
+            docker compose --profile web up -d dh-web
+            echo "dh-web restarted"
+          else
+            echo "dh-web not running; skipping restart"
           fi
 
       - name: Sanity check (dh-pg still healthy)

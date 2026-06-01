@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import tldextract
+from urllib.parse import urlparse
 
 from dh.logging import log
 from dh.persistence.spike import persist_spike_run
@@ -98,12 +99,46 @@ class SpikeResult:
 # Helpers
 # --------------------------------------------------------------------------- #
 
-_TLDX = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
+_TLDX = tldextract.TLDExtract(
+    cache_dir=None,
+    suffix_list_urls=(),
+    include_psl_private_domains=True,
+)
+_HOSTED_PLATFORM_SUFFIXES = (
+    "github.io",
+    "gitlab.io",
+    "pages.dev",
+    "vercel.app",
+    "netlify.app",
+    "herokuapp.com",
+    "firebaseapp.com",
+    "web.app",
+    "surge.sh",
+    "readthedocs.io",
+    "appspot.com",
+    "azurewebsites.net",
+    "cloudfront.net",
+    "amazonaws.com",
+    "myqcloud.com",
+)
+_ASSET_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+    ".mp4", ".mov", ".webm", ".mp3", ".wav", ".ogg",
+    ".pdf", ".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz",
+)
 
 
 def registrable(url: str) -> str | None:
     """Return the registrable (eTLD+1) domain or None for invalid/IP/unsuffixed."""
-    ext = _TLDX(url)
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().strip(".")
+    if not host:
+        return None
+    if parsed.path.lower().split("?", 1)[0].endswith(_ASSET_EXTENSIONS):
+        return None
+    if any(host == suffix or host.endswith(f".{suffix}") for suffix in _HOSTED_PLATFORM_SUFFIXES):
+        return None
+    ext = _TLDX(host)
     if not ext.suffix or not ext.domain:
         return None
     return f"{ext.domain}.{ext.suffix}".lower()

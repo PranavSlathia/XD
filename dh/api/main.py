@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import orjson
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import ORJSONResponse, StreamingResponse
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,8 +118,10 @@ async def _check_redis() -> bool:
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
+async def health(response: Response) -> HealthResponse:
     db_ok, redis_ok = await asyncio.gather(_check_db(), _check_redis())
+    if not (db_ok and redis_ok):
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return HealthResponse(ok=db_ok and redis_ok, db=db_ok, redis=redis_ok)
 
 
@@ -311,15 +313,21 @@ async def digest_today(
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if rq and rq.quote_price_micros and rq.quote_price_micros >= settings.premium_ceiling_micros:
+        if rq is None:
+            continue
+        if rq.is_premium is True:
+            continue
+        if rq.quote_price_micros is None:
+            continue
+        if rq.quote_price_micros >= settings.premium_ceiling_micros:
             continue
         out.append(
             CandidateDigestItem(
                 domain=cand.domain,
                 composite_score=float(cand.composite_score) if cand.composite_score else None,
                 current_status=cand.current_status,
-                quote_price_micros=rq.quote_price_micros if rq else None,
-                top_reasons=[],
+                quote_price_micros=rq.quote_price_micros,
+                top_reasons=cand.top_reasons or [],
             )
         )
     return out

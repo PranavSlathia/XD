@@ -83,6 +83,7 @@ LLM_CALLS_KEY = "llm_calls"
 WHOISJSON_KEY = "whoisjson_calls"
 WHOISFREAKS_KEY = "whoisfreaks_calls"
 BIGQUERY_BYTES_KEY = "bigquery_bytes"
+PORKBUN_QUOTE_KEY = "porkbun_quote_calls"
 
 
 # Convenience module-level singleton for callers that don't manage lifetime.

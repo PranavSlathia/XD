@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/public';
 
 export const API_BASE: string =
-  env.PUBLIC_DH_API_BASE_URL ?? 'http://dh-api:8000';
+  env.PUBLIC_DH_API_BASE_URL ?? '';
 
 export interface CandidateListItem {
   id: number;
@@ -24,8 +24,12 @@ export interface DigestItem {
   top_reasons: string[];
 }
 
-export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init);
+export async function fetchJson<T>(
+  path: string,
+  init?: RequestInit,
+  fetcher: typeof fetch = fetch
+): Promise<T> {
+  const res = await fetcher(`${API_BASE}${path}`, init);
   if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
   return (await res.json()) as T;
 }

@@ -26,6 +26,30 @@ from dh.logging import configure_logging, log
 from dh.score.composite import EnrichmentInputs, compute
 
 
+def _top_reasons(components: dict[str, float], weights: dict[str, float]) -> list[str]:
+    """Human-readable top positive contributors for digest/dashboard."""
+    contributions: list[tuple[float, str]] = []
+    labels = {
+        "availability_score": "authoritative availability",
+        "open_pagerank_score": "Open PageRank authority",
+        "max_source_authority": "strong GitHub source",
+        "source_diversity_bonus": "multiple independent sources",
+        "referring_domains_score": "referring-domain signal",
+        "wayback_clean_score": "clean Wayback history",
+        "age_score": "aged history",
+    }
+    for key, value in components.items():
+        weight = weights.get(key, 0.0)
+        if weight <= 0:
+            continue
+        points = weight * value
+        if points <= 0:
+            continue
+        contributions.append((points, labels.get(key, key)))
+    contributions.sort(reverse=True)
+    return [f"{label}: +{points:.1f}" for points, label in contributions[:3]]
+
+
 async def _current_version_and_weights(
     session: AsyncSession,
 ) -> tuple[int | None, dict[str, float]]:
@@ -116,7 +140,7 @@ async def _gather_inputs(
         .limit(1)
     )
     clr = res.scalar_one_or_none()
-    wb_class = clr.classification if clr else None
+    wb_class = clr.classification if (clr and settings.classifier_enforce_hard_filters) else None
 
     # latest registrar quote
     res = await session.execute(
@@ -164,6 +188,12 @@ async def run_batch(*, batch_size: int) -> int:
             if cand is None:
                 continue
             cand.composite_score = verdict.composite
+            cand.score_breakdown = verdict.components
+            cand.top_reasons = (
+                [f"hard filter: {verdict.hard_filter_reason}"]
+                if verdict.hard_filtered and verdict.hard_filter_reason
+                else _top_reasons(verdict.components, weights)
+            )
             cand.score_version = version
             cand.hard_filtered = verdict.hard_filtered
             cand.hard_filter_reason = verdict.hard_filter_reason

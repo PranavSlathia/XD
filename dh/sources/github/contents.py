@@ -40,11 +40,18 @@ _API_ROOT: Final = "https://api.github.com"
 _LIMITER = AsyncLimiter(max_rate=80, time_period=60)  # well under 5k/hr
 
 # Match either '[text](url)' or a bare URL not preceded by '(' or '['.
-_MD_LINK_RE = re.compile(r"\[(?P<text>[^\]\n]+)\]\((?P<url>https?://[^\s)]+)\)")
+# The negative lookbehind rejects Markdown images: ![alt](url).
+_MD_LINK_RE = re.compile(r"(?<!!)\[(?P<text>[^\]\n]+)\]\((?P<url>https?://[^\s)]+)\)")
 _BARE_URL_RE = re.compile(
     r"(?<![\(\[])(?P<url>https?://[^\s)\],<>\"']+)"
 )
 _FENCE_RE = re.compile(r"^\s*```")
+_ASSET_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+    ".mp4", ".mov", ".webm", ".mp3", ".wav", ".ogg",
+    ".pdf", ".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz",
+)
+_ASSET_QUERY_TOKENS = ("imageview", "format=png", "format=jpg", "width=", "height=")
 
 _INTERESTING_PATHS = (
     "README.md", "README.rst", "README.MD",
@@ -80,6 +87,14 @@ def _strip_url_trailing_punct(url: str) -> str:
     while url.endswith(")") and url.count(")") > url.count("("):
         url = url[:-1]
     return url
+
+
+def _is_asset_url(url: str) -> bool:
+    low = url.lower().split("#", 1)[0]
+    path = low.split("?", 1)[0]
+    if path.endswith(_ASSET_EXTENSIONS):
+        return True
+    return any(tok in low for tok in _ASSET_QUERY_TOKENS)
 
 
 def _surround(lines: list[str], idx: int, window: int = 3) -> str:
@@ -119,6 +134,8 @@ def iter_urls_in_markdown(
 
             surrounding = _surround(lines, i)
             for url in found:
+                if _is_asset_url(url):
+                    continue
                 ctx = classify_url_context(
                     file_path=file_path, url=url, surrounding=surrounding
                 )

@@ -18,6 +18,8 @@ class CandidateListItem(BaseModel):
     score_version: int | None
     hard_filtered: bool
     hard_filter_reason: str | None
+    score_breakdown: dict[str, Any] | None = None
+    top_reasons: list[str] | None = None
     first_observed: dt.datetime
     last_observed: dt.datetime
 

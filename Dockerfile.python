@@ -18,8 +18,8 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install deps first for layer caching
-COPY pyproject.toml ./
-RUN uv venv && uv sync --no-install-project
+COPY pyproject.toml uv.lock ./
+RUN uv venv && uv sync --frozen --no-install-project
 
 COPY README.md ./
 COPY dh ./dh
@@ -27,7 +27,7 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 
 # Bake the project install
-RUN uv sync
+RUN uv sync --frozen
 
 # Non-root by default
 RUN useradd -m -u 1000 dh

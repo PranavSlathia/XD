@@ -1,0 +1,2 @@
+"""Registrar quote clients."""
+

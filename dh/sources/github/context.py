@@ -87,6 +87,22 @@ _OPERATIONAL_PATH_TOKENS: tuple[str, ...] = (
     "update", "heartbeat", "auth", "sso", "webhook", "callback", "health",
 )
 
+_VENDORED_OR_GENERATED_PARTS: frozenset[str] = frozenset({
+    "node_modules",
+    "vendor",
+    "vendors",
+    "third_party",
+    "third-party",
+    "external",
+    "deps",
+    "dist",
+    "build",
+    "generated",
+    "fixtures",
+    "fixture",
+    "testdata",
+})
+
 _EDITORIAL_FILENAMES: frozenset[str] = frozenset({
     "README.md", "README.rst", "README.txt", "README",
     "CHANGELOG.md", "CHANGELOG.rst", "HISTORY.md",
@@ -181,6 +197,9 @@ def classify_url_context(
 
     if any(tok in lower_path for tok in _OPERATIONAL_PATH_TOKENS):
         return ContextType.API_ENDPOINT
+
+    if any(part.lower() in _VENDORED_OR_GENERATED_PARTS for part in parts):
+        return ContextType.DEPENDENCY
 
     for pat in _RUNTIME_URL_PATH_PATTERNS:
         if pat.search(lower_url):

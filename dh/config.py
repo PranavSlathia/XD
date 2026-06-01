@@ -44,8 +44,9 @@ class Settings(BaseSettings):
     bigquery_max_bytes_billed: int = 10 * 1024**3  # 10 GB
 
     # --- LLM transport ---
-    classifier_transport: Literal["codex_cli", "anthropic_api", "openai_api", "stub"] = "codex_cli"
+    classifier_transport: Literal["codex_cli", "anthropic_api", "openai_api", "stub"] = "stub"
     codex_bin: str = "codex"
+    classifier_enforce_hard_filters: bool = False
 
     # --- BigQuery ---
     bigquery_project: str = ""
@@ -58,6 +59,11 @@ class Settings(BaseSettings):
 
     # --- DomCop Open PageRank ---
     openpagerank_api_key: str = ""
+
+    # --- Porkbun registrar quote lookup ---
+    porkbun_api_key: str = ""
+    porkbun_secret_api_key: str = ""
+    porkbun_daily_quote_cap: int = 50
 
     # --- Premium-ceiling for digest gate (USD) ---
     premium_ceiling_usd: int = 200
@@ -83,6 +89,9 @@ class Settings(BaseSettings):
 
     scoring_batch_size: int = 200
     scoring_interval_seconds: int = 60
+
+    registrar_batch_size: int = 10
+    registrar_interval_minutes: int = 60
 
     # --- Sentry / GlitchTip ---
     sentry_dsn: str = ""

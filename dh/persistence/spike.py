@@ -91,7 +91,7 @@ async def _upsert_candidates(
     # Bump last_observed on conflict, leave everything else alone.
     stmt = stmt.on_conflict_do_update(
         index_elements=["domain"],
-        set_={"last_observed": stmt.excluded.last_observed},
+        set_={"last_observed": stmt.excluded.last_observed, "score_version": None},
     )
     await session.execute(stmt)
 
@@ -131,6 +131,7 @@ async def _update_candidate_status(
         return
     cand.current_status = status
     cand.availability_confidence = confidence
+    cand.score_version = None
 
 
 async def persist_spike_run(
@@ -206,6 +207,7 @@ async def persist_spike_run(
             cand = await session.get(Candidate, cid)
             if cand is not None:
                 cand.open_pagerank = float(opr.page_rank_decimal)
+                cand.score_version = None
 
         # 3. source_mentions (resolve foreign-key ids)
         resolved_mentions: list[dict[str, Any]] = []
@@ -295,6 +297,9 @@ async def persist_spike_run(
                     },
                 )
             )
+            cand = await session.get(Candidate, cid)
+            if cand is not None:
+                cand.score_version = None
 
     log.info("spike.persist.done", **counts)
     return counts

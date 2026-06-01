@@ -27,7 +27,7 @@ from dh.classify.base import (
 from dh.classify.factory import make_classifier
 from dh.config import settings
 from dh.db.engine import session_scope
-from dh.db.models import ClassificationRun
+from dh.db.models import Candidate, ClassificationRun
 from dh.logging import configure_logging, log
 
 STALE_AFTER_DAYS = 30
@@ -107,6 +107,9 @@ async def _persist(
             raw_response=r,
         )
     )
+    cand = await session.get(Candidate, candidate_id)
+    if cand is not None:
+        cand.score_version = None
 
 
 async def run_batch(*, batch_size: int) -> int:

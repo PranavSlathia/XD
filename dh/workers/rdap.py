@@ -78,6 +78,7 @@ async def _persist(
         if cand is not None:
             cand.current_status = avail.status
             cand.availability_confidence = avail.confidence
+            cand.score_version = None
 
 
 async def run_batch(*, batch_size: int, concurrency: int = 4) -> int:
