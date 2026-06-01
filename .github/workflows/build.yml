@@ -107,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           if docker ps --filter name=^dh-web$ --format '{{.Names}}' | grep -q '^dh-web$'; then
-            docker compose --profile web up -d dh-web
+          docker compose --profile api --profile web up -d dh-web
             echo "dh-web restarted"
           else
             echo "dh-web not running; skipping restart"
