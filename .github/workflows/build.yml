@@ -91,6 +91,12 @@ jobs:
           docker compose build dh-api
           docker compose build dh-web
 
+      - name: Run database migrations
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          docker compose --profile api run --rm dh-api alembic upgrade head
+
       - name: Restart dh-api if it was already running
         working-directory: /home/pronav/docker/domain-hunter
         run: |
@@ -107,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           if docker ps --filter name=^dh-web$ --format '{{.Names}}' | grep -q '^dh-web$'; then
-          docker compose --profile api --profile web up -d dh-web
+            docker compose --profile api --profile web up -d dh-web
             echo "dh-web restarted"
           else
             echo "dh-web not running; skipping restart"
