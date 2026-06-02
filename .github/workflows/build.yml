@@ -96,15 +96,28 @@ jobs:
           docker compose up -d dh-pg dh-redis
           docker compose run --rm dh-api uv run alembic upgrade head
 
+      - name: Remove retired DH interaction containers
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          docker rm -f dh-web vulture 2>/dev/null || true
+
       - name: Deploy headless stack
         working-directory: /home/pronav/docker/domain-hunter
         run: |
           set -euo pipefail
-          docker compose up -d --remove-orphans
+          docker compose up -d
 
       - name: Sanity checks
         working-directory: /home/pronav/docker/domain-hunter
         run: |
           set -euo pipefail
           docker exec dh-pg pg_isready -U dh -d dh
-          curl -fsS http://127.0.0.1:8007/health
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8007/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs --tail 120 dh-api
+          exit 1
