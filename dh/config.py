@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     env: Literal["dev", "prod"] = "dev"
     project_root: Path = Field(default_factory=Path.cwd)
 
+    # --- Discord operator surface (Vulture) ---
+    discord_webhook_url: str = ""
+    discord_bot_token: str = ""
+    discord_guild_id: int = 0
+    discord_channel_id: int = 0
+    discord_owner_id: int = 0
+    discord_digest_hour_utc: int = 3
+    discord_digest_minute_utc: int = 30
+
     # --- Spend caps ---
     llm_daily_call_cap: int = 200
     whoisjson_daily_cap: int = 33

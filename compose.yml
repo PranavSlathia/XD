@@ -1,8 +1,7 @@
 # Docker Compose for the headless Domain Hunter backend.
 #
-# `docker compose up -d` runs the autonomous discovery pipeline plus the
-# programmatic API. There is intentionally no DH-owned web UI and no Discord bot.
-# Human interaction belongs to the external agent layer (Quip/Codex/Gemini).
+# `docker compose up -d` runs the autonomous discovery pipeline, programmatic
+# API, and Vulture Discord operator. There is intentionally no DH-owned web UI.
 #
 # Confirmed on Dell (100.103.66.92):
 #   - Docker 29.4.3, Compose v5.1.3
@@ -92,6 +91,18 @@ services:
     networks: [dh-net]
     labels:
       autoheal: "true"
+
+  # Vulture - the Discord slash-command operator surface.
+  # No autoheal label: it has no HTTP healthcheck.
+  vulture:
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: vulture
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.bot"]
+    env_file: .env
+    depends_on:
+      dh-pg: { condition: service_healthy }
+    networks: [dh-net]
 
   dh-worker-a2:
     build: { context: ., dockerfile: Dockerfile.python }

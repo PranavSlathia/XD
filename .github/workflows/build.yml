@@ -1,4 +1,4 @@
-name: Build Domain Hunter headless backend
+name: Build Domain Hunter backend
 
 on:
   push:
@@ -96,13 +96,13 @@ jobs:
           docker compose up -d dh-pg dh-redis
           docker compose run --rm dh-api uv run alembic upgrade head
 
-      - name: Remove retired DH interaction containers
+      - name: Remove retired web container
         working-directory: /home/pronav/docker/domain-hunter
         run: |
           set -euo pipefail
-          docker rm -f dh-web vulture 2>/dev/null || true
+          docker rm -f dh-web 2>/dev/null || true
 
-      - name: Deploy headless stack
+      - name: Deploy backend stack
         working-directory: /home/pronav/docker/domain-hunter
         run: |
           set -euo pipefail

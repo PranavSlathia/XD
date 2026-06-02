@@ -1,14 +1,19 @@
 # Domain Hunter
 
-Headless expired-domain discovery and scoring backend. Domain Hunter no longer owns a human-facing UI or Discord interaction layer. Human interaction belongs to the external agent layer: Quip foreman plus Codex/Gemini CLI agents over Discord.
+Expired-domain discovery and scoring backend with a Discord operator surface. Domain Hunter no longer owns a web frontend. Human operators use Vulture slash commands in Discord; the Quip/Codex/Gemini agent layer can also call the FastAPI surface directly.
 
 Repo `PranavSlathia/XD`, deployed at `~/docker/domain-hunter/` on Dell `100.103.66.92`.
 
 ## Scope
 
-Domain Hunter autonomously discovers, enriches, scores, and exposes domain candidates. It does not handle acquisition, listing, resale, or user-operated hunt/rescore buttons.
+Domain Hunter autonomously discovers, enriches, scores, and exposes domain candidates. It does not handle acquisition, listing, resale, or a web dashboard.
 
-The API is a thin programmatic surface for agents:
+Operator and agent surfaces:
+
+- **Vulture** — Discord slash-command operator UI (`vulture`, `dh.bot`).
+- **FastAPI** — thin programmatic API for Quip/Codex/Gemini and automation.
+
+API endpoints:
 
 - `GET /health` — DB and Redis liveness
 - `GET /api/candidates` — ranked candidate list
@@ -18,13 +23,16 @@ The API is a thin programmatic surface for agents:
 - `POST /api/scoring-weights` — create a new scoring version and invalidate scores
 - `GET /api/digest/today` — high-confidence buyable shortlist for the agent layer
 
+There is intentionally no `/api/events` SSE route and no DH web UI.
+
 ## Runtime model
 
-`docker compose up -d` runs only the headless backend stack:
+`docker compose up -d` runs the backend stack:
 
 - `dh-pg` — Postgres 16 + pgvector
 - `dh-redis` — cap counters and worker signaling
 - `dh-api` — FastAPI programmatic API
+- `vulture` — Discord slash-command operator surface
 - `dh-scheduler` — autonomous cron trigger publisher
 - `dh-worker-a2` — GitHub README ingest
 - `dh-worker-rdap` — RDAP / paid availability waterfall
@@ -33,7 +41,7 @@ The API is a thin programmatic surface for agents:
 - `dh-worker-scoring` — composite score persistence
 - `dh-worker-registrar` — registrar quote lookup before digest eligibility
 
-There is intentionally no `dh-web`, no Vulture, no DH Discord bot, and no DH-owned user interaction service.
+There is intentionally no `dh-web` service, no `web/` source tree, and no web healthcheck.
 
 ## Pipeline
 
@@ -43,7 +51,7 @@ There is intentionally no `dh-web`, no Vulture, no DH Discord bot, and no DH-own
 4. **Wayback** — CDX snapshot metadata and classifier evidence.
 5. **Registrar quote** — purchasability and premium ceiling checks before digest eligibility.
 6. **Scoring** — composite score with hard filters and persisted explanation fields.
-7. **Digest API** — agent-callable shortlist, not a DH-owned notification frontend.
+7. **Operator review** — Vulture slash commands and agent API calls inspect, shortlist, and record outcomes.
 
 ## Scoring
 
@@ -67,11 +75,11 @@ Hard filters include `spam_history`, `not_available`, `premium_quote`, `tm_risk`
 ## Architecture invariants
 
 1. **MOC isolation.** `dh-*` names, `dh-net` network, ports `5436/6381`. Never touch `~/docker/moc/` or port `6380`.
-2. **Headless only.** No DH-owned frontend, Discord bot, or operator-click workflow.
-3. **DNS NXDOMAIN is not availability.** Only authoritative availability sources gate the digest.
-4. **A2 path/context classifier is the safety boundary.** Operational URLs, package manifests, workflows, code fences, vendored paths, and assets are rejected.
-5. **Deadness-first ranking.** Live mega-domains must never reach the shortlist.
-6. **Agent-driven operations.** Quip/Codex/Gemini consume the API and decide what to do next.
+2. **No web frontend.** `web/`, `dh-web`, and web-only API surfaces stay removed.
+3. **Vulture stays.** Discord slash commands are the DH-owned operator surface.
+4. **DNS NXDOMAIN is not availability.** Only authoritative availability sources gate the digest.
+5. **A2 path/context classifier is the safety boundary.** Operational URLs, package manifests, workflows, code fences, vendored paths, and assets are rejected.
+6. **Deadness-first ranking.** Live mega-domains must never reach the shortlist.
 
 ## Quick reference
 
@@ -92,7 +100,7 @@ uv run dh spike a2 --no-dry-run --n-repos 500
 # Alembic
 uv run alembic upgrade head
 
-# Headless stack
+# Backend stack: API + Vulture + scheduler + workers + DB/Redis
 docker compose up -d
 ```
 
@@ -105,6 +113,10 @@ DH_OPENPAGERANK_API_KEY=...          # DomCop OPR
 DH_WHOISJSON_API_KEY=...             # authoritative availability fallback
 DH_PORKBUN_API_KEY=...               # registrar quote lookup
 DH_PORKBUN_SECRET_API_KEY=...
+DH_DISCORD_BOT_TOKEN=...             # Vulture slash-command bot
+DH_DISCORD_GUILD_ID=...
+DH_DISCORD_CHANNEL_ID=...
+DH_DISCORD_OWNER_ID=...
 DH_SENTRY_DSN=...                    # GlitchTip-compatible, optional
 DH_DIGEST_MIN_SCORE=40
 DH_OPR_MIN_AUTHORITY=3.0
