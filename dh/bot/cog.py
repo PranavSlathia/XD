@@ -99,9 +99,9 @@ class DHCog(commands.GroupCog, name="dh"):
             await interaction.response.send_message("Not authorized.", ephemeral=True)
             return
         await interaction.response.defer(thinking=True)
-        n = await self._post_shortlist(interaction.followup.send, header="**🎯 Domain shortlist**")
-        if n == 0:
-            return
+        await self._post_shortlist(
+            interaction.followup.send, header="**🦅 Vulture — today's carcasses**"
+        )
 
     @app_commands.command(
         name="candidates", description="Browse candidates (filter by score / status)."
@@ -169,7 +169,9 @@ class DHCog(commands.GroupCog, name="dh"):
             log.warning("dhbot.digest.no_channel", channel_id=settings.discord_channel_id)
             return
         try:
-            n = await self._post_shortlist(channel.send, header="**🎯 Daily domain shortlist**")
+            n = await self._post_shortlist(
+                channel.send, header="**🦅 Vulture's daily drop — freshest carcasses**"
+            )
             log.info("dhbot.digest.posted", count=n)
         except Exception as e:  # a digest failure must not kill the loop
             log.error("dhbot.digest.error", error=str(e))

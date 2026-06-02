@@ -18,7 +18,15 @@ from dh.observability import setup_sentry
 class DHBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()  # guilds only; no message-content needed for slash
-        super().__init__(command_prefix=commands.when_mentioned, intents=intents, help_command=None)
+        activity = discord.Activity(
+            type=discord.ActivityType.watching, name="the web's dead domains 🦅"
+        )
+        super().__init__(
+            command_prefix=commands.when_mentioned,
+            intents=intents,
+            help_command=None,
+            activity=activity,
+        )
 
     async def setup_hook(self) -> None:
         await self.add_cog(DHCog(self))
