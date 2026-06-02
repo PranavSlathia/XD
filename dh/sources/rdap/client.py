@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """RDAP-first availability waterfall (PRD §4.2).
 
 Order:

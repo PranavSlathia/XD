@@ -1,4 +1,4 @@
-"""Pydantic v2 schemas for the FastAPI dashboard surface."""
+"""Pydantic v2 schemas for the headless FastAPI surface."""
 from __future__ import annotations
 
 import datetime as dt

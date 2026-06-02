@@ -32,17 +32,7 @@ class Settings(BaseSettings):
     # --- Runtime ---
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     env: Literal["dev", "prod"] = "dev"
-    project_root: Path = Field(default_factory=lambda: Path.cwd())
-
-    # --- Discord ---
-    discord_webhook_url: str = ""
-    # discord.py bot (the dh-bot service). Empty token = bot disabled.
-    discord_bot_token: str = ""
-    discord_guild_id: int = 0
-    discord_channel_id: int = 0      # where the daily digest is posted
-    discord_owner_id: int = 0        # only this user may act (decisions)
-    discord_digest_hour_utc: int = 3      # 03:30 UTC = 09:00 IST
-    discord_digest_minute_utc: int = 30
+    project_root: Path = Field(default_factory=Path.cwd)
 
     # --- Spend caps ---
     llm_daily_call_cap: int = 200

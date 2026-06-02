@@ -1,7 +1,7 @@
 """Async SQLAlchemy engine + session factory."""
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import (
@@ -42,7 +42,7 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 
 @asynccontextmanager
-async def session_scope() -> AsyncIterator[AsyncSession]:
+async def session_scope() -> AsyncGenerator[AsyncSession, None]:
     """Use as: `async with session_scope() as session: ...`"""
     sm = get_sessionmaker()
     async with sm() as session:

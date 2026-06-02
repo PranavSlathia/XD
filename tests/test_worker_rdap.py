@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(scope="session")
-def postgres_url() -> AsyncIterator[str]:
+def postgres_url() -> Iterator[str]:
     from testcontainers.postgres import PostgresContainer
 
     with PostgresContainer(
@@ -55,7 +55,7 @@ async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
 
 
 @pytest.fixture
-async def _patched_engine(migrated_engine: object) -> AsyncIterator[None]:
+async def patched_engine(migrated_engine: object) -> AsyncIterator[None]:
     with patch.dict(os.environ, {"DH_DB_PASSWORD": "dh-test"}):
         from dh.db import engine as engine_mod
 
@@ -67,7 +67,7 @@ async def _patched_engine(migrated_engine: object) -> AsyncIterator[None]:
 
 
 @pytest.mark.integration
-async def test_rdap_worker_writes_evidence(_patched_engine: None) -> None:
+async def test_rdap_worker_writes_evidence(patched_engine: None) -> None:
     from dh.db.engine import session_scope
     from dh.db.models import AvailabilityCheck, Candidate, RdapSnapshot
     from dh.sources.rdap.client import AvailabilityResult

@@ -4,7 +4,7 @@ Polls candidates that have a `wayback_snapshots` row but no recent
 `classification_runs` (or a stale one with mismatched cache_key) and runs the
 configured ClassifierClient implementation.
 
-Default transport is `stub` — deterministic, free, fine for the dashboard to
+Default transport is `stub` — deterministic, free, fine for the agent API to
 have non-empty classification data. Switch DH_CLASSIFIER_TRANSPORT=codex_cli
 once `dh.classify.codex` is fully implemented (currently only the
 cap-exceeded path returns a real value).
@@ -65,11 +65,12 @@ async def _claim_batch(
     )
     out: list[tuple[int, str, list[str]]] = []
     for row in res.all():
-        cid, domain, cdx_summary, fc, lc = row
+        cid, domain, cdx_summary, _first_capture, _last_capture = row
         snap_ids: list[str] = []
-        if cdx_summary:
+        summary = cast("dict[str, object] | None", cdx_summary if isinstance(cdx_summary, dict) else None)
+        if summary:
             for k in ("first_capture_ts", "last_capture_ts"):
-                v = cdx_summary.get(k) if isinstance(cdx_summary, dict) else None
+                v = summary.get(k)
                 if isinstance(v, str):
                     snap_ids.append(v)
         out.append((cid, domain, snap_ids))
@@ -132,7 +133,7 @@ async def run_batch(*, batch_size: int) -> int:
         except NotImplementedError:
             log.warning("classifier.not_implemented", domain=domain)
             continue
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("classifier.error", domain=domain, error=str(e))
             continue
         async with session_scope() as session:
@@ -163,11 +164,11 @@ async def loop() -> None:
         try:
             n = await run_batch(batch_size=20)
             log.info("worker.classifier.tick", processed=n)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.error("worker.classifier.error", error=str(e))
         try:
             await asyncio.wait_for(stop.wait(), timeout=60)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
     log.info("worker.classifier.shutdown")
 

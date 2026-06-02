@@ -24,7 +24,8 @@ row; that decouples scoring evolution from ingestion.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -46,6 +47,39 @@ from dh.sources.rdap.client import AvailabilityResult
 from dh.sources.wayback.cdx import CdxSummary
 
 GITHUB_README_KIND = "github_readme"
+
+
+class _RepoLike(Protocol):
+    @property
+    def full_name(self) -> str: ...
+
+    @property
+    def stars(self) -> int: ...
+
+    @property
+    def default_branch(self) -> str: ...
+
+
+class _MentionLike(Protocol):
+    @property
+    def repo(self) -> _RepoLike: ...
+
+    @property
+    def file_path(self) -> str: ...
+
+    @property
+    def url(self) -> str: ...
+
+    @property
+    def context_type(self) -> str: ...
+
+    @property
+    def surrounding(self) -> str: ...
+
+
+class _RollupLike(Protocol):
+    @property
+    def mentions(self) -> Sequence[_MentionLike]: ...
 
 
 def _sha256(s: str) -> bytes:
@@ -136,10 +170,10 @@ async def _update_candidate_status(
 
 async def persist_spike_run(
     *,
-    rollups: dict[str, object],
+    rollups: Mapping[str, _RollupLike],
     nxdomain_set: set[str],
     opr_map: dict[str, OPRResult],
-    top_candidates: list[object],
+    top_candidates: Sequence[_RollupLike],
     avail_results: list[AvailabilityResult],
     wb_map: dict[str, CdxSummary],
 ) -> dict[str, int]:
@@ -154,9 +188,9 @@ async def persist_spike_run(
     domain_set: set[str] = set()
     mention_rows: list[dict[str, Any]] = []
 
-    for domain, roll in rollups.items():  # type: ignore[assignment]
+    for domain, roll in rollups.items():
         domain_set.add(domain)
-        for m in roll.mentions:  # type: ignore[attr-defined]
+        for m in roll.mentions:
             repo = m.repo
             full_name = repo.full_name
             repo_keys.setdefault(

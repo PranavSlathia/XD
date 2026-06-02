@@ -35,13 +35,13 @@ def setup_sentry(*, service: str) -> None:
         log.warning("sentry.init.failed", error=str(e))
 
 
-_OTEL_SETUP_DONE = False
+_otel_setup_done = False
 
 
 def setup_tracing(*, service: str) -> None:
     """Idempotent OTel SDK + auto-instrumentation init."""
-    global _OTEL_SETUP_DONE
-    if _OTEL_SETUP_DONE:
+    global _otel_setup_done
+    if _otel_setup_done:
         return
     try:
         from opentelemetry import trace
@@ -82,7 +82,7 @@ def setup_tracing(*, service: str) -> None:
             from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
             HTTPXClientInstrumentor().instrument()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             from opentelemetry.instrumentation.sqlalchemy import (
@@ -90,16 +90,16 @@ def setup_tracing(*, service: str) -> None:
             )
 
             SQLAlchemyInstrumentor().instrument()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
-        _OTEL_SETUP_DONE = True
+        _otel_setup_done = True
         log.info(
             "otel.enabled",
             service=service,
             exporter=("otlp" if settings.otel_exporter_otlp_endpoint else "console"),
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("otel.init.failed", error=str(e))
 
 
@@ -109,5 +109,5 @@ def instrument_fastapi(app: object) -> None:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
         FastAPIInstrumentor.instrument_app(app)  # type: ignore[arg-type]
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("otel.fastapi.failed", error=str(e))

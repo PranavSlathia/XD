@@ -1,25 +1,20 @@
-"""FastAPI dashboard backend (PRD §4.6).
+"""Headless FastAPI surface for the external agent layer.
 
-Endpoints (all JSON via ORJSONResponse):
-    GET  /health                    — db + redis liveness
-    GET  /api/candidates            — paginated list
-    GET  /api/candidates/{domain}   — detail + evidence
-    POST /api/decisions             — operator decision
-    GET  /api/scoring-weights       — current
-    POST /api/scoring-weights       — new version (kicks scoring via redis pubsub)
-    GET  /api/digest/today          — digest-eligible candidates
-    GET  /api/events                — SSE stream from redis pub/sub
+Endpoints are intentionally programmatic only. Humans interact with Domain Hunter
+through Quip/Codex/Gemini agents, which call this API when they need candidate,
+digest, decision, or scoring-weight data.
 """
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import inspect
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import cast
 
-import orjson
+import redis.asyncio as redis_async
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
-from fastapi.responses import ORJSONResponse, StreamingResponse
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dh.api.schemas import (
@@ -49,11 +44,9 @@ from dh.db.models import (
 from dh.logging import configure_logging, log
 from dh.observability import instrument_fastapi, setup_sentry, setup_tracing
 
-DIGEST_CHANNEL = "dh:candidate-events"
-
 
 @asynccontextmanager
-async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging()
     setup_sentry(service="api")
     setup_tracing(service="api")
@@ -63,11 +56,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info("api.shutdown")
 
 
-app = FastAPI(
-    title="Domain Hunter API",
-    default_response_class=ORJSONResponse,
-    lifespan=_lifespan,
-)
+app = FastAPI(title="Domain Hunter API", lifespan=_lifespan)
 instrument_fastapi(app)
 
 # Prometheus exporter — best-effort; safe if dependency is absent.
@@ -79,18 +68,10 @@ except Exception as e:
     log.warning("api.prometheus.unavailable", error=str(e))
 
 
-# --------------------------------------------------------------------------- #
-# Dependency helpers
-# --------------------------------------------------------------------------- #
-
-async def _session() -> AsyncIterator[AsyncSession]:
+async def _session() -> AsyncGenerator[AsyncSession, None]:
     async with session_scope() as s:
         yield s
 
-
-# --------------------------------------------------------------------------- #
-# Health
-# --------------------------------------------------------------------------- #
 
 async def _check_db() -> bool:
     try:
@@ -104,12 +85,18 @@ async def _check_db() -> bool:
 
 async def _check_redis() -> bool:
     try:
-        import redis.asyncio as redis_async
-
-        client = redis_async.from_url(settings.redis_url, socket_connect_timeout=2)
+        client = redis_async.from_url(  # pyright: ignore[reportUnknownMemberType]
+            settings.redis_url,
+            socket_connect_timeout=2,
+        )
         try:
-            await client.ping()
-            return True
+            ping_result = cast(
+                object,
+                client.ping(),  # pyright: ignore[reportUnknownMemberType]
+            )
+            if inspect.isawaitable(ping_result):
+                ping_result = await ping_result
+            return bool(ping_result)
         finally:
             await client.aclose()
     except Exception as e:
@@ -124,10 +111,6 @@ async def health(response: Response) -> HealthResponse:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return HealthResponse(ok=db_ok and redis_ok, db=db_ok, redis=redis_ok)
 
-
-# --------------------------------------------------------------------------- #
-# Candidates
-# --------------------------------------------------------------------------- #
 
 @app.get("/api/candidates", response_model=list[CandidateListItem])
 async def list_candidates(
@@ -149,7 +132,8 @@ async def list_candidates(
 
 @app.get("/api/candidates/{domain}", response_model=CandidateDetail)
 async def get_candidate(
-    domain: str, session: AsyncSession = Depends(_session)
+    domain: str,
+    session: AsyncSession = Depends(_session),
 ) -> CandidateDetail:
     cand = (
         await session.execute(select(Candidate).where(Candidate.domain == domain))
@@ -190,13 +174,10 @@ async def get_candidate(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Decisions
-# --------------------------------------------------------------------------- #
-
 @app.post("/api/decisions", response_model=DecisionResponse, status_code=201)
 async def create_decision(
-    body: DecisionCreate, session: AsyncSession = Depends(_session)
+    body: DecisionCreate,
+    session: AsyncSession = Depends(_session),
 ) -> DecisionResponse:
     cand = (
         await session.execute(select(Candidate).where(Candidate.domain == body.domain))
@@ -221,18 +202,12 @@ async def create_decision(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Scoring weights
-# --------------------------------------------------------------------------- #
-
 @app.get("/api/scoring-weights", response_model=ScoringWeightsItem)
 async def get_scoring_weights(
     session: AsyncSession = Depends(_session),
 ) -> ScoringWeightsItem:
     row = (
-        await session.execute(
-            select(ScoringWeights).order_by(desc(ScoringWeights.version)).limit(1)
-        )
+        await session.execute(select(ScoringWeights).order_by(desc(ScoringWeights.version)).limit(1))
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="no scoring_weights row")
@@ -246,12 +221,11 @@ async def get_scoring_weights(
 
 @app.post("/api/scoring-weights", response_model=ScoringWeightsItem, status_code=201)
 async def create_scoring_weights(
-    body: ScoringWeightsCreate, session: AsyncSession = Depends(_session)
+    body: ScoringWeightsCreate,
+    session: AsyncSession = Depends(_session),
 ) -> ScoringWeightsItem:
     latest_row = (
-        await session.execute(
-            select(ScoringWeights).order_by(desc(ScoringWeights.version)).limit(1)
-        )
+        await session.execute(select(ScoringWeights).order_by(desc(ScoringWeights.version)).limit(1))
     ).scalar_one_or_none()
     next_version = (latest_row.version + 1) if latest_row else 1
     row = ScoringWeights(
@@ -260,18 +234,9 @@ async def create_scoring_weights(
         notes=body.notes,
     )
     session.add(row)
+    await session.execute(update(Candidate).values(score_version=None))
     await session.flush()
-    # Best-effort kick the scoring worker via Redis pub/sub.
-    try:
-        import redis.asyncio as redis_async
-
-        client = redis_async.from_url(settings.redis_url, socket_connect_timeout=2)
-        try:
-            await client.publish(DIGEST_CHANNEL, orjson.dumps({"kind": "weights_bumped", "version": next_version}).decode())
-        finally:
-            await client.aclose()
-    except Exception as e:
-        log.warning("api.weights.publish_failed", error=str(e))
+    log.info("api.scoring_weights.created", version=next_version)
     return ScoringWeightsItem(
         version=row.version,
         weights_json={k: float(v) for k, v in row.weights_json.items()},
@@ -279,10 +244,6 @@ async def create_scoring_weights(
         created_at=row.created_at,
     )
 
-
-# --------------------------------------------------------------------------- #
-# Digest
-# --------------------------------------------------------------------------- #
 
 DIGEST_STATUSES = ("available", "pending_delete", "redemption_period", "expiring_soon")
 
@@ -331,35 +292,3 @@ async def digest_today(
             )
         )
     return out
-
-
-# --------------------------------------------------------------------------- #
-# SSE
-# --------------------------------------------------------------------------- #
-
-@app.get("/api/events")
-async def events() -> StreamingResponse:
-    async def _stream() -> AsyncIterator[bytes]:
-        try:
-            import redis.asyncio as redis_async
-
-            client = redis_async.from_url(settings.redis_url)
-            pubsub = client.pubsub()
-            await pubsub.subscribe(DIGEST_CHANNEL)
-            try:
-                async for message in pubsub.listen():
-                    if message.get("type") != "message":
-                        continue
-                    data = message.get("data")
-                    if isinstance(data, bytes):
-                        data = data.decode("utf-8", "replace")
-                    yield f"data: {data}\n\n".encode()
-            finally:
-                await pubsub.unsubscribe(DIGEST_CHANNEL)
-                await pubsub.aclose()
-                await client.aclose()
-        except Exception as e:
-            log.warning("api.sse.error", error=str(e))
-            yield b"event: error\ndata: redis unavailable\n\n"
-
-    return StreamingResponse(_stream(), media_type="text/event-stream")

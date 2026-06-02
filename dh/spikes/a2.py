@@ -1,23 +1,23 @@
-"""Phase 0.5 — A2 yield spike.
+"""Phase 0.5 - A2 yield spike.
 
-End-to-end: sample 500–1,000 high-star repos → extract README/docs URLs (prose,
-no code blocks) → classify context → normalize to eTLD+1 → dedupe → liveness +
-RDAP → top-50 markdown report.
+End-to-end: sample 500-1,000 high-star repos -> extract README/docs URLs (prose,
+no code blocks) -> classify context -> normalize to eTLD+1 -> dedupe -> liveness +
+RDAP -> top-50 markdown report.
 
 Decision gate (PRD §8 Phase 0.5):
-    ≥ 3 buyable+interesting in top-50  AND  ≥ 1 buyable/day projected
-        → proceed to Phase 1 build
+    >= 3 buyable+interesting in top-50  AND  >= 1 buyable/day projected
+        -> proceed to Phase 1 build
     Otherwise iterate path classifier / raise star floor / pivot methodology.
 """
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import tldextract
-from urllib.parse import urlparse
 
 from dh.logging import log
 from dh.persistence.spike import persist_spike_run
@@ -46,7 +46,7 @@ class SpikeConfig:
     top_n_for_report: int = 50
     fetch_wayback_for_top: int = 30
     persist: bool = True
-    # Human-facing markdown report. None disables it — used by the continuous
+    # Human-facing markdown report. None disables it - used by the continuous
     # worker, which only needs DB persistence (the report path isn't writable
     # in the worker container and is a spike-only artifact).
     output_path: Path | None = field(
@@ -145,7 +145,7 @@ def registrable(url: str) -> str | None:
 
 
 def _shorten(s: str, n: int = 90) -> str:
-    return s if len(s) <= n else s[: n - 1] + "…"
+    return s if len(s) <= n else s[: n - 3] + "..."
 
 
 # --------------------------------------------------------------------------- #
@@ -171,9 +171,7 @@ async def _check_domain(
             return await check_availability(domain)
         except Exception as e:
             log.warning("spike.rdap.error", domain=domain, error=str(e))
-            from dh.sources.rdap.client import AvailabilityResult as _AR
-
-            return _AR(
+            return AvailabilityResult(
                 domain=domain,
                 status="unknown",
                 confidence="unknown",
@@ -221,7 +219,7 @@ def render_report(
     lines.append("# A2 Phase 0.5 yield spike\n")
     lines.append(
         f"Run started {result.started_at.isoformat(timespec='seconds')}, "
-        f"finished {(result.finished_at or datetime.utcnow()).isoformat(timespec='seconds')}.\n"
+        f"finished {(result.finished_at or datetime.now(UTC)).isoformat(timespec='seconds')}.\n"
     )
     lines.append("## Summary")
     lines.append("")
@@ -246,7 +244,7 @@ def render_report(
     lines.append("- [ ] Buyable+interesting count in top-50: ____")
     lines.append("- [ ] Projected buyable/day at scale: ____")
     lines.append("")
-    lines.append("Pass gate: ≥3 buyable+interesting AND ≥1/day projected → proceed to Phase 1 build.")
+    lines.append("Pass gate: >=3 buyable+interesting AND >=1/day projected -> proceed to Phase 1 build.")
     lines.append("")
 
     lines.append("## Top candidates (ranked by Open PageRank, then source authority)")
@@ -257,39 +255,39 @@ def render_report(
         repo_label = cand.first_repo.full_name
         path = cand.mentions[0].file_path
         if avail.status == "available":
-            avail_label = "✅ available"
+            avail_label = "yes available"
         elif avail.status in ("pending_delete", "redemption_period", "expiring_soon"):
-            avail_label = f"⏳ {avail.status}"
+            avail_label = f"pending {avail.status}"
         else:
-            avail_label = f"❌ {avail.status}"
-        wb_label = "—"
-        if cdx and cdx.capture_count:
-            wb_label = f"{cdx.capture_count} captures · {cdx.first_capture[:4]}–{cdx.last_capture[:4]}"
+            avail_label = f"no {avail.status}"
+        wb_label = "-"
+        if cdx and cdx.capture_count and cdx.first_capture and cdx.last_capture:
+            wb_label = f"{cdx.capture_count} captures; {cdx.first_capture[:4]}-{cdx.last_capture[:4]}"
         opr_info = opr_map.get(cand.domain)
         if opr_info and opr_info.found and opr_info.page_rank_decimal:
             opr_label = f"{opr_info.page_rank_decimal:.2f}"
         else:
-            opr_label = "—"
+            opr_label = "-"
         lines.append(
             f"| {i} | `{_shorten(cand.domain, 40)}` | {avail_label} | "
             f"{opr_label} | "
             f"{cand.max_source_authority:,} | {cand.n_mentions} | "
             f"{cand.distinct_sources} | {wb_label} | "
-            f"`{_shorten(repo_label, 30)}` · `{_shorten(path, 25)}` |"
+            f"`{_shorten(repo_label, 30)}` / `{_shorten(path, 25)}` |"
         )
     lines.append("")
 
     lines.append("## Mention detail (first 100 candidates)")
     lines.append("")
     for cand, avail, _ in top[:100]:
-        lines.append(f"### `{cand.domain}` — {avail.status} ({avail.confidence})")
+        lines.append(f"### `{cand.domain}` - {avail.status} ({avail.confidence})")
         for m in cand.mentions[:5]:
             lines.append(
-                f"- `{m.repo.full_name}` ⭐{m.repo.stars:,} · `{m.file_path}` · {m.context_type}"
+                f"- `{m.repo.full_name}` ⭐{m.repo.stars:,} / `{m.file_path}` / {m.context_type}"
             )
             lines.append(f"  - URL: <{m.url}>")
         if len(cand.mentions) > 5:
-            lines.append(f"- _… {len(cand.mentions) - 5} more mentions_")
+            lines.append(f"- _etc. {len(cand.mentions) - 5} more mentions_")
         lines.append("")
 
     return "\n".join(lines)
@@ -301,7 +299,7 @@ def render_report(
 
 async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     cfg = cfg or SpikeConfig()
-    result = SpikeResult(started_at=datetime.utcnow())
+    result = SpikeResult(started_at=datetime.now(UTC))
 
     log.info(
         "spike.a2.sample.start",
@@ -357,7 +355,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
 
     # --- DNS PRE-FILTER (free, fast) over ALL distinct domains ---
     # We're hunting for DEAD domains: most extracted URLs go to live, popular
-    # destinations (github.com, arxiv.org, …). DNS NXDOMAIN is a cheap signal
+    # destinations (github.com, arxiv.org, etc.). DNS NXDOMAIN is a cheap signal
     # that a domain is worth a paid availability check. Live domains are
     # filtered out here.
     all_domains = list(rollups.keys())
@@ -376,7 +374,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     )
 
     # Now rank ONLY the NXDOMAIN survivors.
-    # (Falls back to all domains if zero NXDOMAIN — keeps the report informative
+    # (Falls back to all domains if zero NXDOMAIN - keeps the report informative
     #  rather than empty.)
     survivors = [r for r in rollups.values() if r.domain in nxdomain_set]
     if not survivors:
@@ -387,7 +385,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     # The linking repo's stars are a "who points at this" signal. They do NOT
     # convey backlink authority to the target domain. For resale, what matters
     # is the target domain's OWN inbound-link profile. DomCop Open PageRank
-    # is a free, CC-derived 0–10 score — exactly the DA-proxy we need to filter
+    # is a free, CC-derived 0-10 score - exactly the DA-proxy we need to filter
     # out domains with no real backlink authority before ranking.
     log.info("spike.a2.opr.start", n=len(survivors))
     opr_batch = await fetch_open_pagerank([s.domain for s in survivors])
@@ -440,7 +438,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     result.estimated_spend_usd = spend_micros / 1_000_000
 
     # Wayback for the top N (operator review aid only).
-    wb_targets = [c for c, a in zip(top, avail_results, strict=True)][: cfg.fetch_wayback_for_top]
+    wb_targets = [c for c, _avail in zip(top, avail_results, strict=True)][: cfg.fetch_wayback_for_top]
     log.info("spike.a2.wayback.start", n=len(wb_targets))
     wb_sem = asyncio.Semaphore(4)
     wb_results = await asyncio.gather(
@@ -452,7 +450,7 @@ async def run_a2_spike(cfg: SpikeConfig | None = None) -> SpikeResult:
     for cand, avail in zip(top, avail_results, strict=True):
         triples.append((cand, avail, wb_map.get(cand.domain)))
 
-    result.finished_at = datetime.utcnow()
+    result.finished_at = datetime.now(UTC)
     if cfg.output_path is not None:
         cfg.output_path.parent.mkdir(parents=True, exist_ok=True)
         cfg.output_path.write_text(render_report(cfg, result, triples, opr_map=opr_map))

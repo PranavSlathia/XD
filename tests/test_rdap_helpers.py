@@ -1,6 +1,8 @@
 """Tests for the deterministic helpers inside dh.sources.rdap.client."""
 from __future__ import annotations
 
+from typing import Any, cast
+
 from dh.sources.rdap.client import (
     _coerce_registrar,
     _epp_to_status,
@@ -38,7 +40,7 @@ def test_epp_to_status_default_registered() -> None:
 def test_epp_to_status_tolerates_non_string_element() -> None:
     # A malformed RDAP/WhoisJSON status array may contain a nested list.
     # The mapper must coerce, not raise AttributeError on `.lower()`.
-    assert _epp_to_status(["active", ["nested"]]) == "registered"
+    assert _epp_to_status(["active", cast(Any, ["nested"])]) == "registered"
 
 
 # --------------------------------------------------------------------------- #
@@ -88,7 +90,7 @@ def test_whoisjson_status_string() -> None:
 
 
 def test_whoisjson_status_list_means_registered() -> None:
-    obj = {"status": ["clientTransferProhibited", "clientDeleteProhibited"]}
+    obj: dict[str, object] = {"status": ["clientTransferProhibited", "clientDeleteProhibited"]}
     assert _whoisjson_status(obj) == "registered"
 
 

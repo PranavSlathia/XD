@@ -34,9 +34,6 @@ dependencies = [
     "anyio>=4.6",
     "apscheduler>=3.10",
 
-    # --- Discord bot (dh-bot service) ---
-    "discord.py>=2.4",
-
     # --- Caching / IPC ---
     "redis>=5.2",
 
@@ -114,9 +111,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S", "PLR2004"]
+"tests/**/*.py" = ["S", "PLR2004", "PLC0415"]
 # FastAPI Depends()/Query() must be passed as default values — that's the framework idiom.
 "dh/api/**/*.py" = ["B008"]
+"dh/db/engine.py" = ["PLW0603"]
+"dh/observability.py" = ["PLC0415", "PLW0603", "S110"]
+"dh/spend.py" = ["PLW0603"]
+"dh/workers/*.py" = ["PLC0415"]
 
 # -----------------------------------------------------------------------------
 # basedpyright
@@ -128,6 +129,7 @@ include = ["dh", "tests"]
 exclude = ["alembic/versions/**"]
 reportMissingTypeStubs = false
 reportUnusedCallResult = false
+reportPrivateUsage = false
 
 # -----------------------------------------------------------------------------
 # pytest

@@ -1,6 +1,6 @@
-"""GitHub Search API repo sampler — used by the Phase 0.5 spike.
+"""GitHub Search API repo sampler - used by the Phase 0.5 spike.
 
-The Search API caps at 1,000 results per query, plenty for sampling 500–1,000
+The Search API caps at 1,000 results per query, plenty for sampling 500-1,000
 high-star repos. No GCP setup required (unlike GHArchive on BigQuery).
 
 Authenticated rate limit: 30 search requests/minute = up to 3,000 repos/min.

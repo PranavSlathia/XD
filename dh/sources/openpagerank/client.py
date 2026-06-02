@@ -49,10 +49,9 @@ async def _opr_chunk(
     client: httpx.AsyncClient, chunk: Sequence[str]
 ) -> list[OPRResult]:
     async with _LIMITER:
-        params = [("domains[]", d) for d in chunk]
         resp = await client.get(
             _OPR_URL,
-            params=params,
+            params={"domains[]": list(chunk)},
             headers={"API-OPR": settings.openpagerank_api_key},
             timeout=30,
         )

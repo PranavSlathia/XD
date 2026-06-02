@@ -1,8 +1,4 @@
-"""Smoke tests for the FastAPI app: health endpoint + import safety.
-
-Deeper API tests run as integration tests with testcontainers (skipped
-without docker).
-"""
+"""Smoke tests for the headless FastAPI app: route contract + import safety."""
 from __future__ import annotations
 
 
@@ -22,4 +18,4 @@ def test_routes_registered() -> None:
     assert "/api/decisions" in paths
     assert "/api/scoring-weights" in paths
     assert "/api/digest/today" in paths
-    assert "/api/events" in paths
+    assert "/api/events" not in paths

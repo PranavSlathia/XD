@@ -27,7 +27,7 @@ from dh.score.composite import EnrichmentInputs, compute
 
 
 def _top_reasons(components: dict[str, float], weights: dict[str, float]) -> list[str]:
-    """Human-readable top positive contributors for digest/dashboard."""
+    """Human-readable top positive contributors for digest/agent API."""
     contributions: list[tuple[float, str]] = []
     labels = {
         "availability_score": "authoritative availability",

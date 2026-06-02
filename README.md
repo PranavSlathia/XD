@@ -1,58 +1,77 @@
 # Domain Hunter
 
-Self-hosted expired-domain discovery + scoring pipeline. Personal use, Tailscale-only. Repo `PranavSlathia/XD`, deployed at `~/docker/domain-hunter/` on Dell `100.103.66.92`.
+Headless expired-domain discovery and scoring backend. Domain Hunter no longer owns a human-facing UI or Discord interaction layer. Human interaction belongs to the external agent layer: Quip foreman plus Codex/Gemini CLI agents over Discord.
 
-**Scope:** ingest authority-graph citations → filter for dead/available → enrich → score → daily ranked shortlist. Acquisition + flipping handled separately by the operator.
+Repo `PranavSlathia/XD`, deployed at `~/docker/domain-hunter/` on Dell `100.103.66.92`.
 
-## Status
+## Scope
 
-**Live.** Full pipeline running on the Dell; CI deploys on push to `main` via a self-hosted GitHub Actions runner.
+Domain Hunter autonomously discovers, enriches, scores, and exposes domain candidates. It does not handle acquisition, listing, resale, or user-operated hunt/rescore buttons.
 
-Pipeline stages (each is its own worker, communicates via Postgres + Redis):
-1. **A2** — GitHub README ingest (`dh-worker-a2`). Star-floored, pushed-before-gated, path/context-safety filtered.
-2. **DNS** — NXDOMAIN hint only; not authoritative.
-3. **OPR** — Open PageRank enrichment for NXDOMAIN survivors (`dh-worker-rdap` chain).
-4. **RDAP** — authoritative availability check for survivors.
-5. **Wayback** — CDX snapshot + content classification.
-6. **Scoring** — composite score v3 (`dh-worker-scoring`).
-7. **Digest** — daily Discord webhook for survivors above threshold (`dh-scheduler`).
+The API is a thin programmatic surface for agents:
 
-## Scoring (v3)
+- `GET /health` — DB and Redis liveness
+- `GET /api/candidates` — ranked candidate list
+- `GET /api/candidates/{domain}` — detail plus evidence trail
+- `POST /api/decisions` — record agent/operator outcome
+- `GET /api/scoring-weights` — current scoring weights
+- `POST /api/scoring-weights` — create a new scoring version and invalidate scores
+- `GET /api/digest/today` — high-confidence buyable shortlist for the agent layer
 
-Authority-first weights, OPR-dominant. Lesson from first real ingest: **GitHub README links are `rel="nofollow ugc"`**, so `max_source_authority` (repo stars) is noise — those links don't pass PageRank. OPR is the real backlink-authority signal because PageRank only flows through followed links.
+## Runtime model
 
-```
-open_pagerank_score      0.45   (dominant)
-availability_score       0.15   (deadness-aware: authoritative+available=100, etc.)
+`docker compose up -d` runs only the headless backend stack:
+
+- `dh-pg` — Postgres 16 + pgvector
+- `dh-redis` — cap counters and worker signaling
+- `dh-api` — FastAPI programmatic API
+- `dh-scheduler` — autonomous cron trigger publisher
+- `dh-worker-a2` — GitHub README ingest
+- `dh-worker-rdap` — RDAP / paid availability waterfall
+- `dh-worker-wayback` — CDX history enrichment
+- `dh-worker-classifier` — classifier transport, stub by default
+- `dh-worker-scoring` — composite score persistence
+- `dh-worker-registrar` — registrar quote lookup before digest eligibility
+
+There is intentionally no `dh-web`, no Vulture, no DH Discord bot, and no DH-owned user interaction service.
+
+## Pipeline
+
+1. **A2 ingest** — GitHub README mining with star floor, pushed-before gate, URL/path/context safety filters.
+2. **Availability** — DNS is a hint only; RDAP / paid waterfalls set authoritative availability.
+3. **Authority** — Open PageRank enrichment separates real link authority from nofollow README noise.
+4. **Wayback** — CDX snapshot metadata and classifier evidence.
+5. **Registrar quote** — purchasability and premium ceiling checks before digest eligibility.
+6. **Scoring** — composite score with hard filters and persisted explanation fields.
+7. **Digest API** — agent-callable shortlist, not a DH-owned notification frontend.
+
+## Scoring
+
+Authority-first weights, OPR-dominant. GitHub README links are usually `rel="nofollow ugc"`, so source popularity is useful context but not equivalent to followed PageRank.
+
+```text
+open_pagerank_score      0.45
+availability_score       0.15
 referring_domains_score  0.10
 wayback_clean_score      0.10
 age_score                0.10
-max_source_authority     0.05   (nofollow noise — kept small)
+max_source_authority     0.05
 source_diversity_bonus   0.05
 spam_penalty            -0.10
 tm_risk_penalty         -0.10
 reputation_penalty      -0.10
 ```
 
-Hard filters: `spam_history`, `not_available`, `premium_quote`, `tm_risk`, `low_authority` (confirmed-available but OPR < `DH_OPR_MIN_AUTHORITY`, default 3.0).
+Hard filters include `spam_history`, `not_available`, `premium_quote`, `tm_risk`, and `low_authority`.
 
 ## Architecture invariants
 
-1. **MOC isolation.** `dh-*` names, `dh-net` network, ports `5436/6381`. Never touch `~/docker/moc/` or port 6380.
-2. **DNS NXDOMAIN is a hint, not availability.** Only RDAP / WhoisJSON / WhoisFreaks set `is_authoritative = true`.
-3. **A2 path/context classifier is the safety boundary.** Rejects URLs from `requirements.txt`, workflows, code fences, asset hosts, etc. Registering an operational URL = supply-chain attack surface. 36 parametrised tests guard the rule set.
-4. **Deadness-first ranking.** Rank only NXDOMAIN survivors. Live mega-domains (github.com, npmjs.com) must never reach the shortlist.
-5. **Classifier transport behind `ClassifierClient` ABC.** Codex CLI is the locked transport.
-
-## Docs
-
-- `docs/PRD.md` — product requirements (§12 data model is canonical)
-- `docs/TECH_STACK.md` — every locked technical decision
-- `docs/RESEARCH.md` — methodology research + repo audit
-- `docs/IMPLEMENTATION_NOTES.md` — per-repo + per-API audit
-- `docs/CZDS_APPLICATIONS.md` — zone-file access application template
-- `docs/spikes/` — Phase 0.5 yield-spike outputs
-- `CLAUDE.md` — developer guide for Claude Code sessions
+1. **MOC isolation.** `dh-*` names, `dh-net` network, ports `5436/6381`. Never touch `~/docker/moc/` or port `6380`.
+2. **Headless only.** No DH-owned frontend, Discord bot, or operator-click workflow.
+3. **DNS NXDOMAIN is not availability.** Only authoritative availability sources gate the digest.
+4. **A2 path/context classifier is the safety boundary.** Operational URLs, package manifests, workflows, code fences, vendored paths, and assets are rejected.
+5. **Deadness-first ranking.** Live mega-domains must never reach the shortlist.
+6. **Agent-driven operations.** Quip/Codex/Gemini consume the API and decide what to do next.
 
 ## Quick reference
 
@@ -60,13 +79,10 @@ Hard filters: `spam_history`, `not_available`, `premium_quote`, `tm_risk`, `low_
 # Setup
 uv sync --extra dev
 
-# Tests
-uv run pytest tests/ -q                  # unit (deterministic)
-uv run pytest tests/ -m integration      # testcontainers-Postgres
-
-# Lint + types
+# Quality gates
 uv run ruff check dh tests
 uv run basedpyright dh tests
+uv run pytest tests/ -q
 
 # CLI
 uv run dh --help
@@ -76,21 +92,32 @@ uv run dh spike a2 --no-dry-run --n-repos 500
 # Alembic
 uv run alembic upgrade head
 
-# Local stack
-docker compose --profile all up -d
+# Headless stack
+docker compose up -d
 ```
 
-## Required env (`.env`)
+## Required env
 
-```
+```text
 DH_DB_PASSWORD=...
-DH_GITHUB_TOKEN=...                  # A2 ingest (read-only)
+DH_GITHUB_TOKEN=...                  # A2 ingest, read-only
 DH_OPENPAGERANK_API_KEY=...          # DomCop OPR
-DH_WHOISJSON_API_KEY=...             # authoritative availability
-DH_DISCORD_WEBHOOK_URL=...           # daily digest
-DH_SENTRY_DSN=...                    # GlitchTip (Sentry-compatible)
+DH_WHOISJSON_API_KEY=...             # authoritative availability fallback
+DH_PORKBUN_API_KEY=...               # registrar quote lookup
+DH_PORKBUN_SECRET_API_KEY=...
+DH_SENTRY_DSN=...                    # GlitchTip-compatible, optional
 DH_DIGEST_MIN_SCORE=40
 DH_OPR_MIN_AUTHORITY=3.0
 ```
 
-See `dh/config.py` for the full settings surface (worker tunables, batch sizes, intervals, spend caps).
+See `dh/config.py` for worker tunables, batch sizes, intervals, and spend caps.
+
+## Docs
+
+- `docs/PRD.md` — product requirements
+- `docs/TECH_STACK.md` — locked technical decisions
+- `docs/RESEARCH.md` — methodology research and repo audit
+- `docs/IMPLEMENTATION_NOTES.md` — per-repo and per-API audit
+- `docs/CZDS_APPLICATIONS.md` — zone-file access template
+- `docs/spikes/` — Phase 0.5 yield-spike outputs
+- `CLAUDE.md` — developer guide for Claude Code sessions

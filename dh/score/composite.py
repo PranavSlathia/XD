@@ -2,14 +2,14 @@
 
 Given a candidate's joined enrichments, produce a composite 0-100 score using
 the weights stored in ``scoring_weights`` for the requested version. Pure
-function — no IO, easy to unit-test.
+function - no IO, easy to unit-test.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
 
-from dh.score import normalize as N
+from dh.score import normalize
 
 HardFilterReason = Literal[
     "tm_risk",
@@ -40,7 +40,7 @@ class EnrichmentInputs:
     current_status: str | None = None
     availability_confidence: str | None = None
     # Authority floor for digest-eligibility. Only applies when a domain is
-    # confirmed available — see the low_authority hard filter.
+    # confirmed available - see the low_authority hard filter.
     min_opr_authority: float = 3.0
 
 
@@ -56,7 +56,7 @@ class ScoreBreakdown:
 # sum to 1.0. v3 reflects the dofollow-authority requirement: GitHub README
 # links are rel="nofollow ugc" so max_source_authority is mostly noise and
 # is heavily demoted (0.05). open_pagerank dominates (0.45) because PageRank
-# flows only through followed links — nofollow-only domains naturally score 0.
+# flows only through followed links - nofollow-only domains naturally score 0.
 # availability_score is a smaller additive (0.15) because the digest already
 # hard-gates on availability_confidence; it doesn't need to dominate the score.
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -86,8 +86,8 @@ def _availability_score(status: str | None, confidence: str | None) -> float:
             return 100.0
         if s == "expiring_soon":
             return 60.0
-        return 0.0  # authoritative + registered/other → not acquirable
-    # Non-authoritative hint only (e.g. a DNS NXDOMAIN suggestion) — worth a
+        return 0.0  # authoritative + registered/other -> not acquirable
+    # Non-authoritative hint only (e.g. a DNS NXDOMAIN suggestion) - worth a
     # little, but not confirmed.
     if s in {"available", "pending_delete"}:
         return 35.0
@@ -154,12 +154,12 @@ def compute(
             hard_filter_reason="not_available",
             components={},
         )
-    # Authority floor — only fires for *confirmed-available* domains that lack
+    # Authority floor - only fires for *confirmed-available* domains that lack
     # backlink authority. Live/unchecked domains naturally score low via
     # availability_score=0; tagging them "low_authority" would be misleading.
     # Open PageRank inherently weights dofollow (PageRank doesn't flow through
     # rel=nofollow), so a domain whose only inbound links are nofollow (e.g.
-    # GitHub README citations) sits near zero here — exactly the signal we want.
+    # GitHub README citations) sits near zero here - exactly the signal we want.
     if (
         inputs.availability_confidence == "authoritative"
         and (inputs.current_status or "").lower()
@@ -191,12 +191,12 @@ def compute(
         "availability_score": _availability_score(
             inputs.current_status, inputs.availability_confidence
         ),
-        "max_source_authority": N.normalize_max_source_authority(inputs.max_source_authority),
-        "source_diversity_bonus": N.normalize_source_diversity(inputs.distinct_sources),
-        "referring_domains_score": N.normalize_referring_domains(inputs.referring_domains),
-        "open_pagerank_score": N.normalize_open_pagerank(inputs.open_pagerank),
+        "max_source_authority": normalize.normalize_max_source_authority(inputs.max_source_authority),
+        "source_diversity_bonus": normalize.normalize_source_diversity(inputs.distinct_sources),
+        "referring_domains_score": normalize.normalize_referring_domains(inputs.referring_domains),
+        "open_pagerank_score": normalize.normalize_open_pagerank(inputs.open_pagerank),
         "wayback_clean_score": _wayback_clean(inputs.wayback_classification),
-        "age_score": N.normalize_age(age_years),
+        "age_score": normalize.normalize_age(age_years),
         "spam_penalty": 100.0 if inputs.spam_flag else 0.0,
         "tm_risk_penalty": 100.0 * max(0.0, min(1.0, inputs.tm_risk_probability)),
         "reputation_penalty": _reputation_penalty(inputs.reputation_flag),

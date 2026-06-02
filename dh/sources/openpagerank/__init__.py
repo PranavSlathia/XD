@@ -1,4 +1,4 @@
-"""DomCop Open PageRank — domain-level CC-derived PageRank (0–10), free.
+"""DomCop Open PageRank - domain-level CC-derived PageRank (0-10), free.
 
 https://www.domcop.com/openpagerank/
 

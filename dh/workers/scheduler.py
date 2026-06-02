@@ -1,11 +1,9 @@
-"""APScheduler-backed daily-cron worker.
+# pyright: reportUnknownMemberType=false
+"""APScheduler-backed autonomous discovery scheduler.
 
 Jobs:
-  - 02:00 UTC daily: publish ``dh:trigger-a2`` on Redis (dh-worker-a2 picks up)
-  - 03:30 UTC daily (= 09:00 IST): build today's digest and post to Discord
+  - 02:00 UTC daily: publish ``dh:trigger-a2`` on Redis for ``dh-worker-a2``
   - every 5 min: heartbeat log
-
-If DH_DISCORD_WEBHOOK_URL is unset, the digest job logs-and-skips (no error).
 """
 from __future__ import annotations
 
@@ -13,20 +11,13 @@ import asyncio
 import signal
 
 import orjson
-from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import desc, select
 
-from dh.api.schemas import CandidateDigestItem
 from dh.config import settings
-from dh.db.engine import session_scope
-from dh.db.models import Candidate, RegistrarQuote
 from dh.logging import configure_logging, log
-from dh.notifications.discord import post_digest
 
 TRIGGER_A2_CHANNEL = "dh:trigger-a2"
-DIGEST_STATUSES = ("available", "pending_delete", "redemption_period", "expiring_soon")
 
 
 async def _publish_a2_trigger() -> None:
@@ -46,62 +37,6 @@ async def _publish_a2_trigger() -> None:
         log.error("scheduler.a2_trigger.error", error=str(e))
 
 
-async def _gather_digest() -> list[CandidateDigestItem]:
-    async with session_scope() as session:
-        stmt = (
-            select(Candidate)
-            .where(
-                Candidate.composite_score >= settings.digest_min_score,
-                Candidate.hard_filtered.is_(False),
-                Candidate.availability_confidence == "authoritative",
-                Candidate.current_status.in_(DIGEST_STATUSES),
-            )
-            .order_by(desc(Candidate.composite_score))
-            .limit(settings.digest_max_items)
-        )
-        rows = (await session.execute(stmt)).scalars().all()
-        items: list[CandidateDigestItem] = []
-        for cand in rows:
-            rq = (
-                await session.execute(
-                    select(RegistrarQuote)
-                    .where(RegistrarQuote.candidate_id == cand.id)
-                    .order_by(desc(RegistrarQuote.observed_at))
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if rq is None:
-                continue
-            if rq.is_premium is True:
-                continue
-            if rq.quote_price_micros is None:
-                continue
-            if rq.quote_price_micros >= settings.premium_ceiling_micros:
-                continue
-            items.append(
-                CandidateDigestItem(
-                    domain=cand.domain,
-                    composite_score=float(cand.composite_score) if cand.composite_score else None,
-                    current_status=cand.current_status,
-                    quote_price_micros=rq.quote_price_micros,
-                    top_reasons=cand.top_reasons or [],
-                )
-            )
-    return items
-
-
-async def _send_digest() -> None:
-    if not settings.discord_webhook_url:
-        log.info("scheduler.digest.skipped", reason="no DH_DISCORD_WEBHOOK_URL")
-        return
-    items = await _gather_digest()
-    try:
-        sent = await post_digest(items)
-        log.info("scheduler.digest.posted", count=len(items), sent=sent)
-    except Exception as e:
-        log.error("scheduler.digest.error", error=str(e))
-
-
 async def _heartbeat() -> None:
     log.info("scheduler.heartbeat")
 
@@ -117,9 +52,6 @@ def _build_scheduler() -> AsyncIOScheduler:
         id="a2_trigger_daily",
         replace_existing=True,
     )
-    # NOTE: the daily digest is now owned by the dh-bot (discord.py) service, which posts
-    # the shortlist with interactive buttons. The legacy webhook digest job is retired here;
-    # any previously-persisted "discord_digest_daily" job is removed on startup in _amain().
     sched.add_job(
         _heartbeat,
         "interval",
@@ -146,13 +78,6 @@ async def _amain() -> None:
             pass
 
     sched.start()
-    # Retire the legacy webhook digest job from the persistent jobstore (the dh-bot owns
-    # the digest now). Safe to call repeatedly.
-    try:
-        sched.remove_job("discord_digest_daily")
-        log.info("scheduler.digest_job.removed")
-    except JobLookupError:
-        pass
     log.info("scheduler.start")
     try:
         await shutdown.wait()

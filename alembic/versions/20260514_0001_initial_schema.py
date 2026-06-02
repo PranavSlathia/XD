@@ -466,7 +466,7 @@ def upgrade() -> None:
                     "tm_risk_penalty": -0.10,
                     "reputation_penalty": -0.10,
                 },
-                "notes": "Initial weights from PRD §4.5. Tunable from dashboard.",
+                "notes": "Initial weights from PRD §4.5. Tunable through the agent API.",
             },
         ],
     )

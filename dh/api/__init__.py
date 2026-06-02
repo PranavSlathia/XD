@@ -1,4 +1,4 @@
-"""FastAPI dashboard backend.
+"""Headless FastAPI backend.
 
 ``app`` is exposed at the package root so uvicorn can import as ``dh.api:app``.
 """
