@@ -115,6 +115,19 @@ services:
     labels:
       autoheal: "true"
 
+  # Discord bot — the operator frontend (replaces dh-web). Imports dh.* directly.
+  # No autoheal label: it has no HTTP healthcheck (autoheal would kill it).
+  dh-bot:
+    profiles: ["workers", "all"]
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-bot
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.bot"]
+    env_file: .env
+    depends_on:
+      dh-pg: { condition: service_healthy }
+    networks: [dh-net]
+
   dh-worker-a2:
     profiles: ["workers", "all"]
     build: { context: ., dockerfile: Dockerfile.python }

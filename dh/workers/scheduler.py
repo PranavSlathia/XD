@@ -13,6 +13,7 @@ import asyncio
 import signal
 
 import orjson
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import desc, select
@@ -116,14 +117,9 @@ def _build_scheduler() -> AsyncIOScheduler:
         id="a2_trigger_daily",
         replace_existing=True,
     )
-    sched.add_job(
-        _send_digest,
-        "cron",
-        hour=3,
-        minute=30,
-        id="discord_digest_daily",
-        replace_existing=True,
-    )
+    # NOTE: the daily digest is now owned by the dh-bot (discord.py) service, which posts
+    # the shortlist with interactive buttons. The legacy webhook digest job is retired here;
+    # any previously-persisted "discord_digest_daily" job is removed on startup in _amain().
     sched.add_job(
         _heartbeat,
         "interval",
@@ -150,6 +146,13 @@ async def _amain() -> None:
             pass
 
     sched.start()
+    # Retire the legacy webhook digest job from the persistent jobstore (the dh-bot owns
+    # the digest now). Safe to call repeatedly.
+    try:
+        sched.remove_job("discord_digest_daily")
+        log.info("scheduler.digest_job.removed")
+    except JobLookupError:
+        pass
     log.info("scheduler.start")
     try:
         await shutdown.wait()

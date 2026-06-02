@@ -34,6 +34,9 @@ dependencies = [
     "anyio>=4.6",
     "apscheduler>=3.10",
 
+    # --- Discord bot (dh-bot service) ---
+    "discord.py>=2.4",
+
     # --- Caching / IPC ---
     "redis>=5.2",
 
