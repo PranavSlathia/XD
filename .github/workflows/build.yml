@@ -113,11 +113,26 @@ jobs:
         run: |
           set -euo pipefail
           docker exec dh-pg pg_isready -U dh -d dh
-          for _ in $(seq 1 30); do
+          api_ready=0
+          for _ in $(seq 1 90); do
             if curl -fsS http://127.0.0.1:8007/health; then
-              exit 0
+              api_ready=1
+              break
             fi
             sleep 2
           done
-          docker logs --tail 120 dh-api
-          exit 1
+          if [ "$api_ready" -ne 1 ]; then
+            echo "dh-api did not become healthy; recent logs:"
+            docker logs --tail 120 dh-api || true
+            exit 1
+          fi
+          docker compose ps dh-api dh-pg dh-redis vulture
+          if docker ps -a --format '{{.Names}}' | grep -qx 'dh-web'; then
+            echo "retired dh-web container still exists"
+            exit 1
+          fi
+          if ! docker compose ps --services --filter status=running | grep -qx 'vulture'; then
+            echo "vulture is not running; recent logs:"
+            docker logs --tail 120 vulture || true
+            exit 1
+          fi
