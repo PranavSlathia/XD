@@ -1,135 +1,103 @@
 # Domain Hunter
 
-Expired-domain discovery and scoring backend with a Discord operator surface. Domain Hunter no longer owns a web frontend. Human operators use Vulture slash commands in Discord; the Quip/Codex/Gemini agent layer can also call the FastAPI surface directly.
+Always-on, evidence-first research pipeline for expiring `.com` domains. It
+continuously narrows public pending-delete inventory to a small queue that is
+worth human diligence. It does **not** buy, bid, backorder, list, or contact
+anyone.
 
-Repo `PranavSlathia/XD`, deployed at `~/docker/domain-hunter/` on Dell `100.103.66.92`.
+Repo `PranavSlathia/XD`, deployed at `~/docker/domain-hunter/` on Dell
+`100.103.66.92`. The API binds to localhost on port `8007`; Vulture is the
+optional Discord operator surface. There is intentionally no public dashboard.
 
-## Scope
+## What runs by default
 
-Domain Hunter autonomously discovers, enriches, scores, and exposes domain candidates. It does not handle acquisition, listing, resale, or a web dashboard.
+`docker compose up -d` starts:
 
-Operator and agent surfaces:
+- `dh-pg` and `dh-redis` — isolated state on localhost ports `5436` and `6381`.
+- `dh-api` — read/review API on localhost port `8007`.
+- `dh-worker-inventory` — six-hour pending-delete inventory cycle.
+- `dh-worker-rdap` — authoritative registration-state confirmation.
+- `dh-worker-wayback` — archive-history metadata for active candidates.
+- `dh-worker-scoring` — legacy candidate score maintenance.
+- `vulture` — Discord commands and a daily research digest when configured.
 
-- **Vulture** — Discord slash-command operator UI (`vulture`, `dh.bot`).
-- **FastAPI** — thin programmatic API for Quip/Codex/Gemini and automation.
+The old GitHub miner and LLM classifier are available only through the
+`experimental` Compose profile. Hand-registration quotes are in the
+`hand-registration` profile. The dead Redis scheduler is gone; every active
+worker owns its own bounded loop.
 
-API endpoints:
+## Current pipeline
 
-- `GET /health` — DB and Redis liveness
-- `GET /api/candidates` — ranked candidate list
-- `GET /api/candidates/{domain}` — detail plus evidence trail
-- `POST /api/decisions` — record agent/operator outcome
-- `GET /api/scoring-weights` — current scoring weights
-- `POST /api/scoring-weights` — create a new scoring version and invalidate scores
-- `GET /api/digest/today` — high-confidence buyable shortlist for the agent layer
+1. Download DropCatch's public five-day pending-delete feed every six hours.
+2. Keep clean alphabetic `.com` names of practical length.
+3. Intersect them locally with the cached OpenPageRank Top-10-Million dataset.
+4. Join NameBio's free, attribution-required RetailStats data. Compound names
+   use a conservative word split and the weakest relevant keyword placement;
+   overlapping sales are never added together.
+5. Detect suspicious batches with near-identical authority metrics.
+6. Prioritize the bounded public price/deadline lookups by market evidence,
+   anomaly status, and score—not raw PageRank alone.
+7. Persist the listing, provenance, source version, run metrics, and separate
+   authority, resale, risk, confidence, and overall scores.
+8. Confirm status through RDAP and collect Wayback metadata.
+9. Surface `research`, `observe`, or `reject`. Only a human can turn research
+   into an acquisition decision.
 
-There is intentionally no `/api/events` SSE route and no DH web UI.
+An automatic `research` verdict is deliberately incomplete. The following
+remain mandatory before spending money:
 
-## Runtime model
+- archive content review;
+- independent backlink/profile review;
+- trademark and former-brand clearance;
+- domain-specific comparable sales;
+- a credible end-user buyer thesis; and
+- an operator-set maximum bid.
 
-`docker compose up -d` runs the backend stack:
+Authority is not resale value, a pending-delete listing is not guaranteed
+availability, and an automated score is never permission to acquire.
 
-- `dh-pg` — Postgres 16 + pgvector
-- `dh-redis` — cap counters and worker signaling
-- `dh-api` — FastAPI programmatic API
-- `vulture` — Discord slash-command operator surface
-- `dh-scheduler` — autonomous cron trigger publisher
-- `dh-worker-a2` — GitHub README ingest
-- `dh-worker-rdap` — RDAP / paid availability waterfall
-- `dh-worker-wayback` — CDX history enrichment
-- `dh-worker-classifier` — classifier transport, stub by default
-- `dh-worker-scoring` — composite score persistence
-- `dh-worker-registrar` — registrar quote lookup before digest eligibility
+## API
 
-There is intentionally no `dh-web` service, no `web/` source tree, and no web healthcheck.
+- `GET /health` — DB and Redis liveness.
+- `GET /api/pipeline/status` — latest run and funnel counts.
+- `GET /api/opportunities?verdict=research` — active, actionable evidence-backed
+  queue. Pass `actionable_only=false` to audit manually closed candidates.
+- `GET /api/candidates` and `GET /api/candidates/{domain}` — candidate history.
+- `GET /api/digest/today` — research queue prepared for an agent/Discord digest.
+- `POST /api/decisions` — append a human outcome; `passed`, `bought`, and
+  `lost_to_other` leave the actionable queue, while a later `watching` decision
+  reopens it. This performs no marketplace action.
+- `GET|POST /api/scoring-weights` — legacy score configuration.
 
-## Pipeline
-
-1. **A2 ingest** — GitHub README mining with star floor, pushed-before gate, URL/path/context safety filters.
-2. **Availability** — DNS is a hint only; RDAP / paid waterfalls set authoritative availability.
-3. **Authority** — Open PageRank enrichment separates real link authority from nofollow README noise.
-4. **Wayback** — CDX snapshot metadata and classifier evidence.
-5. **Registrar quote** — purchasability and premium ceiling checks before digest eligibility.
-6. **Scoring** — composite score with hard filters and persisted explanation fields.
-7. **Operator review** — Vulture slash commands and agent API calls inspect, shortlist, and record outcomes.
-
-## Scoring
-
-Authority-first weights, OPR-dominant. GitHub README links are usually `rel="nofollow ugc"`, so source popularity is useful context but not equivalent to followed PageRank.
-
-```text
-open_pagerank_score      0.45
-availability_score       0.15
-referring_domains_score  0.10
-wayback_clean_score      0.10
-age_score                0.10
-max_source_authority     0.05
-source_diversity_bonus   0.05
-spam_penalty            -0.10
-tm_risk_penalty         -0.10
-reputation_penalty      -0.10
-```
-
-Hard filters include `spam_history`, `not_available`, `premium_quote`, `tm_risk`, and `low_authority`.
-
-## Architecture invariants
-
-1. **MOC isolation.** `dh-*` names, `dh-net` network, ports `5436/6381`. Never touch `~/docker/moc/` or port `6380`.
-2. **No web frontend.** `web/`, `dh-web`, and web-only API surfaces stay removed.
-3. **Vulture stays.** Discord slash commands are the DH-owned operator surface.
-4. **DNS NXDOMAIN is not availability.** Only authoritative availability sources gate the digest.
-5. **A2 path/context classifier is the safety boundary.** Operational URLs, package manifests, workflows, code fences, vendored paths, and assets are rejected.
-6. **Deadness-first ranking.** Live mega-domains must never reach the shortlist.
-
-## Quick reference
+## Setup and checks
 
 ```bash
-# Setup
 uv sync --extra dev
-
-# Quality gates
-uv run ruff check dh tests
+uv run ruff check .
 uv run basedpyright dh tests
-uv run pytest tests/ -q
+uv run pytest -q
 
-# CLI
-uv run dh --help
-uv run dh db check
-uv run dh spike a2 --no-dry-run --n-repos 500
-
-# Alembic
 uv run alembic upgrade head
-
-# Backend stack: API + Vulture + scheduler + workers + DB/Redis
+docker compose config --services
 docker compose up -d
+curl -fsS http://127.0.0.1:8007/api/pipeline/status
 ```
 
-## Required env
+Copy `.env.example` to `.env` and set `DH_DB_PASSWORD`. The always-on inventory
+path needs no marketplace credentials. Discord needs its bot/channel settings;
+the new OpenPageRank API key is optional enrichment. Secrets and downloaded
+reference data stay outside Git.
 
-```text
-DH_DB_PASSWORD=...
-DH_GITHUB_TOKEN=...                  # A2 ingest, read-only
-DH_OPENPAGERANK_API_KEY=...          # DomCop OPR
-DH_WHOISJSON_API_KEY=...             # authoritative availability fallback
-DH_PORKBUN_API_KEY=...               # registrar quote lookup
-DH_PORKBUN_SECRET_API_KEY=...
-DH_DISCORD_BOT_TOKEN=...             # Vulture slash-command bot
-DH_DISCORD_GUILD_ID=...
-DH_DISCORD_CHANNEL_ID=...
-DH_DISCORD_OWNER_ID=...
-DH_SENTRY_DSN=...                    # GlitchTip-compatible, optional
-DH_DIGEST_MIN_SCORE=40
-DH_OPR_MIN_AUTHORITY=3.0
-```
+## Durable docs
 
-See `dh/config.py` for worker tunables, batch sizes, intervals, and spend caps.
+- `docs/ALWAYS_ON_PIPELINE.md` — current product contract, operations, evidence
+  gates, failure modes, and upgrade path.
+- `docs/CANDIDATE_REVIEW-2026-08-20.md` — first real-feed validation and manual
+  accept/reject record.
+- `docs/CZDS_APPLICATIONS.md` — truthful CZDS use guidance; never misrepresent a
+  commercial acquisition purpose as non-commercial research.
+- `CLAUDE.md` — engineering and Dell isolation rules.
 
-## Docs
-
-- `docs/PRD.md` — product requirements
-- `docs/TECH_STACK.md` — locked technical decisions
-- `docs/RESEARCH.md` — methodology research and repo audit
-- `docs/IMPLEMENTATION_NOTES.md` — per-repo and per-API audit
-- `docs/CZDS_APPLICATIONS.md` — zone-file access template
-- `docs/spikes/` — Phase 0.5 yield-spike outputs
-- `CLAUDE.md` — developer guide for Claude Code sessions
+The older PRD, research dossier, tech-stack log, and implementation audit are
+historical design records. Where they conflict with the current pipeline, this
+README and `docs/ALWAYS_ON_PIPELINE.md` win.

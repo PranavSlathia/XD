@@ -28,6 +28,7 @@ dependencies = [
     "aiolimiter>=1.2",
     "tldextract>=5.1",
     "dnspython>=2.7",
+    "wordninja>=2.0.0",
 
     # --- CLI / workers ---
     "typer>=0.13",

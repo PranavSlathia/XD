@@ -7,9 +7,11 @@ runs the RDAP waterfall, persists results to ``availability_checks`` and
 Idempotent: a candidate whose latest authoritative check is fresher than
 ``stale_after_days`` is skipped.
 """
+
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import signal
 
 from sqlalchemy import text
@@ -19,34 +21,119 @@ from dh.config import settings
 from dh.db.engine import session_scope
 from dh.db.models import AvailabilityCheck, Candidate, RdapSnapshot
 from dh.logging import configure_logging, log
+from dh.opportunity import MODEL_VERSION
 from dh.sources.rdap.client import AvailabilityResult, check_availability
 
-STALE_AFTER_DAYS = 7
+
+def _expiry_to_date(value: str | None) -> dt.date | None:
+    if not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            return dt.date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return parsed.date()
 
 
 async def _claim_batch(session: AsyncSession, *, batch_size: int) -> list[tuple[int, str]]:
-    """Return (id, domain) pairs needing a fresh authoritative check."""
+    """Return candidates due for RDAP, with bounded retries for unknowns.
+
+    Active pending-delete inventory is checked frequently. An unknown response
+    is then backed off for days instead of being retried every ten minutes.
+    """
     sql = text(
         """
         SELECT c.id, c.domain
         FROM candidates c
-        WHERE NOT EXISTS (
-            SELECT 1 FROM availability_checks a
+        LEFT JOIN opportunity_assessments oa
+          ON oa.candidate_id = c.id
+         AND oa.model_version = :model_version
+        LEFT JOIN LATERAL (
+            SELECT o.decision
+            FROM outcomes o
+            WHERE o.candidate_id = c.id
+            ORDER BY o.decided_at DESC, o.id DESC
+            LIMIT 1
+        ) latest_outcome ON true
+        LEFT JOIN LATERAL (
+            SELECT a.observed_at, a.status, a.is_authoritative
+            FROM availability_checks a
             WHERE a.candidate_id = c.id
-              AND a.is_authoritative = true
-              AND a.observed_at > now() - (:stale || ' days')::interval
-        )
-        ORDER BY c.last_observed DESC NULLS LAST
+            ORDER BY a.observed_at DESC
+            LIMIT 1
+        ) latest ON true
+        WHERE (latest_outcome.decision IS NULL
+               OR latest_outcome.decision NOT IN ('passed', 'bought', 'lost_to_other'))
+          AND (
+            latest.observed_at IS NULL
+            OR (
+                EXISTS (
+                    SELECT 1
+                    FROM marketplace_listings ml
+                    WHERE ml.candidate_id = c.id
+                      AND ml.listing_status = 'active'
+                      AND ml.drop_date >= current_date - 1
+                )
+                AND latest.observed_at < now() - (:active_hours || ' hours')::interval
+            )
+            OR (
+                NOT EXISTS (
+                    SELECT 1
+                    FROM marketplace_listings ml
+                    WHERE ml.candidate_id = c.id
+                      AND ml.listing_status = 'active'
+                      AND ml.drop_date >= current_date - 1
+                )
+                AND (
+                    (
+                        latest.is_authoritative = true
+                        AND latest.status = 'available'
+                        AND latest.observed_at < now() - (:available_hours || ' hours')::interval
+                    )
+                    OR (
+                        latest.is_authoritative = true
+                        AND latest.status IS DISTINCT FROM 'available'
+                        AND latest.observed_at < now() - (:registered_days || ' days')::interval
+                    )
+                    OR (
+                        latest.is_authoritative IS DISTINCT FROM true
+                        AND latest.observed_at < now() - (:unknown_days || ' days')::interval
+                    )
+                )
+            )
+          )
+        ORDER BY
+            EXISTS (
+                SELECT 1 FROM marketplace_listings ml
+                WHERE ml.candidate_id = c.id
+                  AND ml.listing_status = 'active'
+                  AND ml.drop_date >= current_date - 1
+            ) DESC,
+            CASE oa.verdict WHEN 'research' THEN 0 WHEN 'observe' THEN 1 ELSE 2 END,
+            oa.overall_score DESC NULLS LAST,
+            c.authority_rank ASC NULLS LAST,
+            c.last_observed DESC NULLS LAST
         LIMIT :lim
         """
     )
-    res = await session.execute(sql, {"stale": str(STALE_AFTER_DAYS), "lim": batch_size})
+    res = await session.execute(
+        sql,
+        {
+            "active_hours": str(settings.rdap_active_stale_hours),
+            "available_hours": str(settings.rdap_available_stale_hours),
+            "registered_days": str(settings.rdap_registered_stale_days),
+            "unknown_days": str(settings.rdap_unknown_stale_days),
+            "model_version": MODEL_VERSION,
+            "lim": batch_size,
+        },
+    )
     return [(row[0], row[1]) for row in res.all()]
 
 
-async def _persist(
-    session: AsyncSession, candidate_id: int, avail: AvailabilityResult
-) -> None:
+async def _persist(session: AsyncSession, candidate_id: int, avail: AvailabilityResult) -> None:
     session.add(
         AvailabilityCheck(
             candidate_id=candidate_id,
@@ -68,7 +155,7 @@ async def _persist(
                 candidate_id=candidate_id,
                 rdap_server=rdap_server,
                 epp_statuses=avail.epp_statuses or None,
-                expiry_date=None,
+                expiry_date=_expiry_to_date(avail.expiry_date),
                 registrar=avail.registrar,
                 raw_response=avail.raw_response,
             )

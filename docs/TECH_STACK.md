@@ -1,4 +1,8 @@
-# Domain Hunter — Tech Stack Decisions
+# Domain Hunter — historical tech-stack decisions
+
+> **Historical record.** Scheduler, dashboard, default classifier, and
+> GitHub-first decisions below are not the current runtime. See
+> `docs/ALWAYS_ON_PIPELINE.md`, `compose.yml`, and `README.md`.
 
 > Decision log built interactively from PRD. Locked rows = decision made. Open rows = pending interview.
 > NO scaffolding begins until every row is locked.

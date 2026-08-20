@@ -4,6 +4,7 @@
 posts a single test message. **Disabled** if DH_DISCORD_WEBHOOK_URL is empty;
 that's how we keep the command safe in scaffold-mode (no creds yet).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -44,13 +45,26 @@ def build_digest_payload(candidates: list[CandidateDigestItem]) -> dict[str, Any
                 {
                     "title": c.domain,
                     "description": (
-                        f"score: {c.composite_score:.1f}" if c.composite_score is not None
-                        else "score: n/a"
-                    ) + f" · status: {c.current_status or 'unknown'}{price}",
-                    "color": 0x4CAF50,
+                        f"research score: {c.composite_score:.1f}"
+                        if c.composite_score is not None
+                        else "research score: n/a"
+                    )
+                    + f" · status: {c.current_status or 'unknown'}{price}"
+                    + " · human review required",
+                    "color": 0xFF9800,
                     "fields": [
-                        {"name": "Reasons", "value": ", ".join(c.top_reasons) or "—", "inline": False}
+                        {
+                            "name": "Reasons",
+                            "value": ", ".join(c.top_reasons) or "—",
+                            "inline": False,
+                        },
+                        {
+                            "name": "Missing before acquisition",
+                            "value": ", ".join(c.missing_evidence) or "manual sign-off",
+                            "inline": False,
+                        },
                     ],
+                    "footer": {"text": "Research only · this message places no bid or purchase"},
                 }
             )
     return {"username": "Domain Hunter", "embeds": embeds}

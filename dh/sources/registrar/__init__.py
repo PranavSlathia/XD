@@ -1,2 +1,1 @@
 """Registrar quote clients."""
-

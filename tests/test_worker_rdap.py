@@ -2,8 +2,11 @@
 
 Reuses the testcontainer Postgres fixture pattern from test_persistence.py.
 """
+
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 import os
 import shutil
 from collections.abc import AsyncIterator, Iterator
@@ -37,7 +40,7 @@ def postgres_url() -> Iterator[str]:
         yield async_url
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
     engine = create_async_engine(postgres_url)
     from alembic.config import Config
@@ -49,7 +52,7 @@ async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", sync_url)
-    command.upgrade(cfg, "head")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
     yield engine
     await engine.dispose()
 
@@ -99,10 +102,14 @@ async def test_rdap_worker_writes_evidence(patched_engine: None) -> None:
         avs = (await session.execute(select(AvailabilityCheck))).scalars().all()
         snaps = (await session.execute(select(RdapSnapshot))).scalars().all()
         cands = (
-            await session.execute(
-                select(Candidate).where(Candidate.domain == "rdap-worker-test.example")
+            (
+                await session.execute(
+                    select(Candidate).where(Candidate.domain == "rdap-worker-test.example")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(avs) == 1
     assert avs[0].status == "available"
     assert avs[0].is_authoritative is True
@@ -114,3 +121,117 @@ async def test_rdap_worker_writes_evidence(patched_engine: None) -> None:
     with patch("dh.workers.rdap.check_availability", AsyncMock(side_effect=_fake_check)):
         n2 = await worker.run_batch(batch_size=10, concurrency=1)
     assert n2 == 0
+
+
+@pytest.mark.integration
+async def test_latest_manual_decision_gates_actionable_work(patched_engine: None) -> None:
+    from sqlalchemy import select
+
+    from dh.api.main import _terminal_decision_exists
+    from dh.db.engine import session_scope
+    from dh.db.models import Candidate, MarketplaceListing, OpportunityAssessment, Outcome
+    from dh.opportunity import MODEL_VERSION
+    from dh.workers.rdap import _claim_batch
+
+    now = dt.datetime.now(dt.UTC)
+    async with session_scope() as session:
+        closed = Candidate(domain="manual-closed-test.com")
+        open_candidate = Candidate(domain="manual-open-test.com")
+        session.add_all((closed, open_candidate))
+        await session.flush()
+        for candidate in (closed, open_candidate):
+            session.add(
+                MarketplaceListing(
+                    candidate_id=candidate.id,
+                    marketplace="test",
+                    external_key=f"{candidate.domain}:test",
+                    acquisition_type="backorder",
+                    listing_status="active",
+                    drop_date=now.date() + dt.timedelta(days=1),
+                )
+            )
+            session.add(
+                OpportunityAssessment(
+                    candidate_id=candidate.id,
+                    model_version=MODEL_VERSION,
+                    authority_score=50,
+                    resale_score=50,
+                    risk_score=10,
+                    confidence_score=50,
+                    overall_score=50,
+                    verdict="research",
+                )
+            )
+        session.add(
+            Outcome(
+                candidate_id=closed.id,
+                decided_at=now,
+                decision="passed",
+                pass_reason="tm_risk",
+            )
+        )
+
+    async with session_scope() as session:
+        due = await _claim_batch(session, batch_size=100)
+        actionable = set(
+            (
+                await session.execute(
+                    select(Candidate.domain).where(
+                        Candidate.domain.in_((closed.domain, open_candidate.domain)),
+                        ~_terminal_decision_exists(Candidate.id),
+                    )
+                )
+            ).scalars()
+        )
+
+    assert open_candidate.domain in {domain for _candidate_id, domain in due}
+    assert closed.domain not in {domain for _candidate_id, domain in due}
+    assert actionable == {open_candidate.domain}
+
+    async with session_scope() as session:
+        session.add(
+            Outcome(
+                candidate_id=closed.id,
+                decided_at=now + dt.timedelta(seconds=1),
+                decision="watching",
+            )
+        )
+    async with session_scope() as session:
+        reopened = set(
+            (
+                await session.execute(
+                    select(Candidate.domain).where(
+                        Candidate.domain == closed.domain,
+                        ~_terminal_decision_exists(Candidate.id),
+                    )
+                )
+            ).scalars()
+        )
+    assert reopened == {closed.domain}
+
+
+@pytest.mark.integration
+async def test_terminal_decision_gates_inactive_legacy_candidate(
+    patched_engine: None,
+) -> None:
+    """The terminal-outcome predicate covers both active and legacy branches."""
+    from dh.db.engine import session_scope
+    from dh.db.models import Candidate, Outcome
+    from dh.workers.rdap import _claim_batch
+
+    async with session_scope() as session:
+        candidate = Candidate(domain="manual-closed-legacy.example")
+        session.add(candidate)
+        await session.flush()
+        session.add(
+            Outcome(
+                candidate_id=candidate.id,
+                decision="passed",
+                pass_reason="other",
+            )
+        )
+
+    async with session_scope() as session:
+        due = await _claim_batch(session, batch_size=100)
+
+    assert candidate.domain not in {domain for _candidate_id, domain in due}

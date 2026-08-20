@@ -4,13 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Domain Hunter — a self-hosted pipeline that ingests external-URL citations from authority graphs (GitHub READMEs, academic papers, patents), filters for dead/available domains, scores them, and surfaces a daily shortlist. Personal-use tool, Tailscale-only. Repo: `PranavSlathia/XD` (deployed at `~/docker/domain-hunter/` on Dell `100.103.66.92`).
+Domain Hunter — a self-hosted, always-on acquisition-research pipeline. The
+default path intersects public pending-delete inventory with authority and
+retail-demand references, confirms lifecycle/history evidence, and surfaces a
+small human-research queue. It never bids, buys, backorders, lists, contacts, or
+spends. Personal-use, localhost/Tailscale-only. Repo: `PranavSlathia/XD`
+(deployed at `~/docker/domain-hunter/` on Dell `100.103.66.92`).
 
-Authoritative docs live in `docs/` — read these before any non-trivial change:
-- `PRD.md` — product scope (the §12 data model is canonical)
-- `TECH_STACK.md` — every locked tech decision
-- `RESEARCH.md` — methodology research + repo audit
-- `IMPLEMENTATION_NOTES.md` — per-repo + per-API audit notes
+Read these before any non-trivial change:
+- `docs/ALWAYS_ON_PIPELINE.md` — current product, evidence, safety, and operations contract
+- `README.md` — current service topology and API
+- `docs/CANDIDATE_REVIEW-2026-08-20.md` — real-feed validation baseline
+- `docs/PRD.md`, `TECH_STACK.md`, `RESEARCH.md`, and `IMPLEMENTATION_NOTES.md` — historical records only
 
 ## Commands
 
@@ -44,21 +49,39 @@ uv run alembic upgrade head
 
 ## CI / Deploy
 
-`.github/workflows/build.yml` runs on a **self-hosted GitHub Actions runner on the Dell** (systemd unit `actions.runner.PranavSlathia-XD.dh-dell`). Every push to `main` rebuilds the `dh-api` Docker image on the Dell and restarts `dh-api` if it's already running.
+`.github/workflows/build.yml` runs on a **self-hosted GitHub Actions runner on the Dell** (systemd unit `actions.runner.PranavSlathia-XD.dh-dell`). Every relevant push to `main` runs unit and real-Postgres integration tests, backs up the Domain Hunter database, applies migrations, rebuilds the shared Python image, and reconciles the default Domain Hunter stack.
 
 The runner survives reboots. Workflow is guarded with `if: github.repository == 'PranavSlathia/XD' && github.event_name != 'pull_request'` because the repo is public — fork PRs cannot execute the runner.
 
 ## Architecture invariants (do not violate)
 
-1. **MOC isolation is non-negotiable.** Domain Hunter uses `dh-*` container names (`dh-pg`, `dh-redis`, `dh-api`, `dh-worker-*`, `dh-scheduler`), `dh-net` network, `dh-pg-data` + `dh-redis-data` volumes, host ports **5436 (pg) + 6381 (redis)**, paths `/var/data/dh/` + `/var/backups/dh/`. Never edit anything under `~/docker/moc/` on the Dell. Port 6380 belongs to `moc-falkordb`; never use it.
+1. **Server isolation is non-negotiable.** Domain Hunter uses `dh-*` container
+   names, `dh-net`, `dh-pg-data` + `dh-redis-data`, localhost ports **5436
+   (Postgres), 6381 (Redis), and 8007 (API)**, and paths `/var/data/dh/` +
+   `/var/backups/dh/`. Never edit MOC, Desk OS, or landing files, Compose projects,
+   ports, networks, volumes, routes, or recovery state.
 
 2. **DNS NXDOMAIN is NOT authoritative availability.** `dns_is_nxdomain()` in `dh/sources/rdap/client.py` is a *hint* — it tells us a candidate is worth a paid availability check. Only RDAP / WhoisJSON / WhoisFreaks may set `availability_confidence = 'authoritative'`. Registered domains can have no DNS records; never regress this.
 
-3. **The A2 path/context safety classifier is the safety boundary.** `dh/sources/github/context.py` rejects URLs from `requirements.txt`, `package.json`, `Dockerfile`, `.github/workflows/`, `SECURITY.md`, fenced code blocks, API endpoints, asset hosts, etc. Registering an operational URL would create a supply-chain-attack surface. 36 parametrised tests in `tests/test_github_context.py` guard the rule set — extend them when adding categories.
+3. **Automatic output is research only.** No marketplace source may contain an
+   authenticated write/bid/buy/backorder/list method. `research` still carries
+   mandatory missing evidence. `/api/pipeline/status` must report automated
+   purchase disabled and human approval required.
 
-4. **Classifier transport is behind `ClassifierClient` ABC.** Workers and the spike never import a concrete classifier; they call `make_classifier()` which reads `DH_CLASSIFIER_TRANSPORT`. Codex CLI is the locked transport per `TECH_STACK.md`; Anthropic / OpenAI / Stub implementations are slots. Keep the interface stable.
+4. **Source evidence is validated and attributable.** Bulk downloads are cached,
+   size/schema/host validated, atomically replaced, and recorded in `source_terms`
+   plus `discovery_runs`. NameBio data displayed externally requires attribution.
+   Never reinterpret a failed source as zero risk or fabricate a metric.
 
-5. **Deadness-first ranking is canonical.** The original ranking-by-`source_authority × mentions` is structurally broken — it surfaces github.com / npmjs.com / arxiv.org because they're the most-mentioned-anywhere, which means they're the most-alive. Correct order: (1) DNS-sweep all candidates, (2) keep NXDOMAIN survivors, (3) Open PageRank lookup, (4) rank survivors by OPR, then max source authority, then diversity. See `dh/spikes/a2.py:run_a2_spike` for the canonical pipeline.
+5. **Authority is not resale value.** The default funnel is pending-delete
+   inventory → authority prefilter → conservative keyword-demand evidence →
+   anomaly/risk gates → acquisition detail → RDAP/Wayback → human review. Raw OPR
+   rank alone must not decide the detail-request budget or research verdict.
+
+6. **The experimental A2 path/context classifier remains a safety boundary.** If
+   the `experimental` profile is enabled, `dh/sources/github/context.py` must keep
+   rejecting operational/package/workflow/security URLs. Stub classifier output
+   is never persisted as evidence.
 
 ## Data model — high-level
 
@@ -77,15 +100,18 @@ Key invariants in the schema:
 
 ## Topology
 
-Container topology (in `compose.yml`, profiled):
+Container topology (in `compose.yml`):
+
 ```
-foundation : dh-pg, dh-redis                                (Phase 0)
-api        : foundation + dh-api                            (Phase 1)
-workers    : foundation + dh-scheduler + dh-worker-{a2,rdap,wayback,classifier,scoring}
-all        : everything
+default           : dh-pg, dh-redis, dh-api, vulture,
+                    dh-worker-{inventory,rdap,wayback,scoring}
+experimental      : + dh-worker-{a2,classifier}
+hand-registration : + dh-worker-registrar
 ```
 
-Worker pattern: each worker is its own container with its own Python entry point at `dh.workers.<name>:main`. Workers communicate via Postgres as source of truth + Redis pub/sub for low-latency dashboard notifications. No direct worker-to-worker HTTP.
+Each worker owns its own bounded polling loop and Python entry point at
+`dh.workers.<name>:main`. Postgres is the source of truth. There is no central
+scheduler and no direct worker-to-worker HTTP.
 
 ## Gotchas
 

@@ -19,7 +19,7 @@ def _is_owner(interaction: discord.Interaction) -> bool:
 
 
 class DecisionView(discord.ui.View):
-    """Bought / Pass / Watching buttons for one candidate."""
+    """Record-only decision buttons; none performs an acquisition."""
 
     def __init__(self, domain: str) -> None:
         super().__init__(timeout=None)
@@ -45,7 +45,7 @@ class DecisionView(discord.ui.View):
             content=f"✅ **{self.domain}** → {decision}", view=self
         )
 
-    @discord.ui.button(label="Bought", style=discord.ButtonStyle.success, emoji="💰")
+    @discord.ui.button(label="Record acquired", style=discord.ButtonStyle.success, emoji="📝")
     async def bought(
         self, interaction: discord.Interaction, _button: discord.ui.Button[Any]
     ) -> None:
@@ -84,7 +84,7 @@ class DHCog(commands.GroupCog, name="dh"):
     async def _post_shortlist(self, send: Any, *, header: str) -> int:
         items = await queries.fetch_shortlist()
         if not items:
-            await send(content=f"{header}\n_Nothing on the shortlist right now._")
+            await send(content=f"{header}\n_Nothing in the research queue right now._")
             return 0
         await send(content=header)
         for item in items:
@@ -92,7 +92,7 @@ class DHCog(commands.GroupCog, name="dh"):
         return len(items)
 
     @app_commands.command(
-        name="shortlist", description="Today's ranked domain shortlist with decision buttons."
+        name="shortlist", description="Today's acquisition-backed research queue."
     )
     async def shortlist(self, interaction: discord.Interaction) -> None:
         if not _is_owner(interaction):
@@ -100,7 +100,8 @@ class DHCog(commands.GroupCog, name="dh"):
             return
         await interaction.response.defer(thinking=True)
         await self._post_shortlist(
-            interaction.followup.send, header="**🦅 Vulture — today's carcasses**"
+            interaction.followup.send,
+            header="**🦅 Domain research queue — review required; no automated buying**",
         )
 
     @app_commands.command(
@@ -170,7 +171,8 @@ class DHCog(commands.GroupCog, name="dh"):
             return
         try:
             n = await self._post_shortlist(
-                channel.send, header="**🦅 Vulture's daily drop — freshest carcasses**"
+                channel.send,
+                header="**🦅 Daily domain research queue — no automated buying**",
             )
             log.info("dhbot.digest.posted", count=n)
         except Exception as e:  # a digest failure must not kill the loop

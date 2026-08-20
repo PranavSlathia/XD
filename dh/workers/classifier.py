@@ -9,6 +9,7 @@ have non-empty classification data. Switch DH_CLASSIFIER_TRANSPORT=codex_cli
 once `dh.classify.codex` is fully implemented (currently only the
 cap-exceeded path returns a real value).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -60,14 +61,14 @@ async def _claim_batch(
         LIMIT :lim
         """
     )
-    res = await session.execute(
-        sql, {"stale": str(STALE_AFTER_DAYS), "lim": batch_size}
-    )
+    res = await session.execute(sql, {"stale": str(STALE_AFTER_DAYS), "lim": batch_size})
     out: list[tuple[int, str, list[str]]] = []
     for row in res.all():
         cid, domain, cdx_summary, _first_capture, _last_capture = row
         snap_ids: list[str] = []
-        summary = cast("dict[str, object] | None", cdx_summary if isinstance(cdx_summary, dict) else None)
+        summary = cast(
+            "dict[str, object] | None", cdx_summary if isinstance(cdx_summary, dict) else None
+        )
         if summary:
             for k in ("first_capture_ts", "last_capture_ts"):
                 v = summary.get(k)
@@ -114,6 +115,12 @@ async def _persist(
 
 
 async def run_batch(*, batch_size: int) -> int:
+    if settings.classifier_transport == "stub":
+        log.warning(
+            "worker.classifier.stub_disabled",
+            note="stub classifications are not evidence and will not be persisted",
+        )
+        return 0
     classifier = make_classifier()
     async with session_scope() as session:
         rows = await _claim_batch(session, batch_size=batch_size)

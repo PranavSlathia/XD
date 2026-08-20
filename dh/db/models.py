@@ -2,6 +2,7 @@
 
 All tables defined here. Alembic auto-generate operates against `metadata`.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -50,6 +51,7 @@ class Base(DeclarativeBase):
 # Sources & provenance
 # --------------------------------------------------------------------------- #
 
+
 class Source(Base):
     __tablename__ = "sources"
 
@@ -66,6 +68,7 @@ class Source(Base):
 
 class SourceTerms(Base):
     """Per-source legal / ToS / robots memory."""
+
     __tablename__ = "source_terms"
 
     kind: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -82,6 +85,7 @@ class SourceTerms(Base):
 # --------------------------------------------------------------------------- #
 # Candidates
 # --------------------------------------------------------------------------- #
+
 
 class ScoringWeights(Base):
     __tablename__ = "scoring_weights"
@@ -109,8 +113,11 @@ class Candidate(Base):
     availability_confidence: Mapped[str | None] = mapped_column(String(16))
     # Backlink-authority enrichments (written at ingest, consumed by scoring).
     # NULL until enriched.
-    open_pagerank: Mapped[float | None] = mapped_column(Numeric)     # 0-10 (DomCop OPR)
-    referring_domains: Mapped[int | None] = mapped_column(Integer)   # Phase 2 (Common Crawl)
+    open_pagerank: Mapped[float | None] = mapped_column(Numeric)  # 0-10 (DomCop OPR)
+    referring_domains: Mapped[int | None] = mapped_column(Integer)  # Phase 2 (Common Crawl)
+    authority_rank: Mapped[int | None] = mapped_column(Integer)
+    authority_source: Mapped[str | None] = mapped_column(String(64))
+    authority_observed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     composite_score: Mapped[float | None] = mapped_column(Numeric)
     score_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     top_reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
@@ -121,6 +128,9 @@ class Candidate(Base):
     hard_filter_reason: Mapped[str | None] = mapped_column(String(64))
 
     mentions: Mapped[list[SourceMention]] = relationship(back_populates="candidate")
+    marketplace_listings: Mapped[list[MarketplaceListing]] = relationship(
+        back_populates="candidate"
+    )
 
     __table_args__ = (
         Index(
@@ -136,9 +146,7 @@ class SourceMention(Base):
     __tablename__ = "source_mentions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"))
 
     source_url: Mapped[str | None] = mapped_column(Text)
@@ -165,16 +173,119 @@ class SourceMention(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Continuous marketplace discovery
+# --------------------------------------------------------------------------- #
+
+
+class DiscoveryRun(Base):
+    """One source-ingestion attempt and its funnel counts."""
+
+    __tablename__ = "discovery_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    started_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'running'")
+    )
+    source_version: Mapped[str | None] = mapped_column(String(128))
+    fetched_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    prefiltered_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    matched_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    persisted_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("ix_discovery_runs_source_started", "source", "started_at"),)
+
+
+class MarketplaceListing(Base):
+    """Read-only evidence that a domain has a real acquisition path."""
+
+    __tablename__ = "marketplace_listings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
+    marketplace: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    acquisition_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    listing_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    drop_date: Mapped[dt.date | None] = mapped_column(Date)
+    closes_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    minimum_price_micros: Mapped[int | None] = mapped_column(BigInteger)
+    current_price_micros: Mapped[int | None] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3), server_default=text("'USD'"))
+    listing_url: Mapped[str | None] = mapped_column(Text)
+    first_seen: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    candidate: Mapped[Candidate] = relationship(back_populates="marketplace_listings")
+
+    __table_args__ = (
+        UniqueConstraint("marketplace", "external_key"),
+        Index(
+            "ix_marketplace_listings_active_deadline",
+            "listing_status",
+            "closes_at",
+        ),
+        Index(
+            "ix_marketplace_listings_candidate_seen",
+            "candidate_id",
+            "last_seen",
+        ),
+    )
+
+
+class OpportunityAssessment(Base):
+    """Versioned deterministic research verdict; never an instruction to buy."""
+
+    __tablename__ = "opportunity_assessments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
+    model_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    computed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    authority_score: Mapped[float] = mapped_column(Numeric, nullable=False)
+    resale_score: Mapped[float] = mapped_column(Numeric, nullable=False)
+    risk_score: Mapped[float] = mapped_column(Numeric, nullable=False)
+    confidence_score: Mapped[float] = mapped_column(Numeric, nullable=False)
+    overall_score: Mapped[float] = mapped_column(Numeric, nullable=False)
+    verdict: Mapped[str] = mapped_column(String(32), nullable=False)
+    reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    rejection_reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    missing_evidence: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    signals: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "model_version"),
+        Index(
+            "ix_opportunity_assessments_verdict_score",
+            "verdict",
+            "overall_score",
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Evidence trail
 # --------------------------------------------------------------------------- #
+
 
 class RdapSnapshot(Base):
     __tablename__ = "rdap_snapshots"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     observed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -184,18 +295,14 @@ class RdapSnapshot(Base):
     registrar: Mapped[str | None] = mapped_column(Text)
     raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
-    __table_args__ = (
-        Index("ix_rdap_snapshots_candidate_observed", "candidate_id", "observed_at"),
-    )
+    __table_args__ = (Index("ix_rdap_snapshots_candidate_observed", "candidate_id", "observed_at"),)
 
 
 class AvailabilityCheck(Base):
     __tablename__ = "availability_checks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     observed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -218,9 +325,7 @@ class HttpObservation(Base):
     __tablename__ = "http_observations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     observed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -234,9 +339,7 @@ class WaybackSnapshot(Base):
     __tablename__ = "wayback_snapshots"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     observed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -250,9 +353,7 @@ class ClassificationRun(Base):
     __tablename__ = "classification_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     observed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -280,9 +381,7 @@ class RegistrarQuote(Base):
     __tablename__ = "registrar_quotes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     observed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -303,9 +402,7 @@ class Outcome(Base):
     __tablename__ = "outcomes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("candidates.id", ondelete="CASCADE")
-    )
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
     decided_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -321,7 +418,10 @@ __all__ = [
     "Base",
     "Candidate",
     "ClassificationRun",
+    "DiscoveryRun",
     "HttpObservation",
+    "MarketplaceListing",
+    "OpportunityAssessment",
     "Outcome",
     "RdapSnapshot",
     "RegistrarQuote",

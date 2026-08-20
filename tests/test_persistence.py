@@ -5,8 +5,10 @@ then applies Alembic migrations and exercises `persist_spike_run` end-to-end.
 
 Skipped automatically if Docker isn't available locally.
 """
+
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 from collections.abc import AsyncIterator, Iterator
@@ -41,7 +43,7 @@ def postgres_url() -> Iterator[str]:
         yield async_url
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
     engine = create_async_engine(postgres_url)
     # Apply Alembic migrations via the public command API.
@@ -54,7 +56,7 @@ async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", sync_url)
-    command.upgrade(cfg, "head")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
     yield engine
     await engine.dispose()
 
@@ -161,15 +163,19 @@ async def test_persist_is_idempotent(patched_engine: None) -> None:
 
     repo = Repo(owner="other", name="repo", stars=5_000)
     eu = ExtractedUrl(
-        repo=repo, file_path="README.md",
-        url="https://idempotent.example/x", context_type="editorial",
+        repo=repo,
+        file_path="README.md",
+        url="https://idempotent.example/x",
+        context_type="editorial",
         surrounding="link to https://idempotent.example/x there",
     )
     rollup = CandidateRollup(domain="idempotent.example", mentions=[eu])
     rollups: dict[str, CandidateRollup] = {"idempotent.example": rollup}
     avail = AvailabilityResult(
-        domain="idempotent.example", status="registered",
-        confidence="authoritative", source="rdap",
+        domain="idempotent.example",
+        status="registered",
+        confidence="authoritative",
+        source="rdap",
     )
 
     async def _run() -> None:
@@ -193,9 +199,7 @@ async def test_persist_is_idempotent(patched_engine: None) -> None:
         ).scalar_one()
         n_cands = (
             await session.execute(
-                select(func.count(Candidate.id)).where(
-                    Candidate.domain == "idempotent.example"
-                )
+                select(func.count(Candidate.id)).where(Candidate.domain == "idempotent.example")
             )
         ).scalar_one()
         n_ments = (

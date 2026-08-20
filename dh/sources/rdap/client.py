@@ -11,6 +11,7 @@ Order:
 DNS NXDOMAIN is NOT authoritative availability. Always confirm via RDAP/WhoisJSON
 before marking a candidate `available`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -70,6 +71,7 @@ _WHOISJSON_URL = "https://whoisjson.com/api/v1/whois"
 # 1. DNS hint
 # --------------------------------------------------------------------------- #
 
+
 async def dns_is_nxdomain(domain: str) -> bool:
     """Returns True if the domain has NO authoritative NS records.
 
@@ -97,6 +99,7 @@ _dns_is_nxdomain = dns_is_nxdomain
 # --------------------------------------------------------------------------- #
 # 2. RDAP bootstrap + query
 # --------------------------------------------------------------------------- #
+
 
 @lru_cache(maxsize=1)
 def _bootstrap_cache() -> dict[str, list[str]]:
@@ -191,6 +194,7 @@ def _whoisjson_status(data: dict[str, object]) -> str:
     retry=retry_if_exception_type(httpx.HTTPError),
     stop=stop_after_attempt(2),
     wait=wait_exponential(multiplier=2, min=1, max=10),
+    reraise=True,
 )
 async def _rdap_query(client: httpx.AsyncClient, domain: str) -> AvailabilityResult:
     bootstrap = await _load_bootstrap(client)
@@ -273,10 +277,12 @@ async def _rdap_query(client: httpx.AsyncClient, domain: str) -> AvailabilityRes
 # 3. WhoisJSON fallback
 # --------------------------------------------------------------------------- #
 
+
 @retry(
     retry=retry_if_exception_type(httpx.HTTPError),
     stop=stop_after_attempt(2),
     wait=wait_exponential(multiplier=2, min=1, max=10),
+    reraise=True,
 )
 async def _whoisjson_query(client: httpx.AsyncClient, domain: str) -> AvailabilityResult:
     if not settings.whoisjson_api_key:
@@ -349,6 +355,7 @@ async def _whoisjson_query(client: httpx.AsyncClient, domain: str) -> Availabili
 # --------------------------------------------------------------------------- #
 # Waterfall orchestration
 # --------------------------------------------------------------------------- #
+
 
 async def check_availability(domain: str) -> AvailabilityResult:
     """Run the waterfall and return the most authoritative result.

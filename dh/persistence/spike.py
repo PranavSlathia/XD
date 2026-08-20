@@ -241,6 +241,11 @@ async def persist_spike_run(
             cand = await session.get(Candidate, cid)
             if cand is not None:
                 cand.open_pagerank = float(opr.page_rank_decimal)
+                if opr.referring_domains is not None:
+                    cand.referring_domains = opr.referring_domains
+                if opr.rank is not None:
+                    cand.authority_rank = opr.rank
+                cand.authority_source = "openpagerank_api"
                 cand.score_version = None
 
         # 3. source_mentions (resolve foreign-key ids)

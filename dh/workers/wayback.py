@@ -3,6 +3,7 @@
 Polls candidates that lack a fresh wayback_snapshots row (>30 days old), ranked
 by max source authority. Fetches CDX summary and writes a snapshot row.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +17,7 @@ from dh.config import settings
 from dh.db.engine import session_scope
 from dh.db.models import Candidate, WaybackSnapshot
 from dh.logging import configure_logging, log
+from dh.opportunity import MODEL_VERSION
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
 
 
@@ -28,6 +30,7 @@ def _ts_to_date(ts: str | None) -> dt.date | None:
     except ValueError:
         return None
 
+
 STALE_AFTER_DAYS = 30
 
 
@@ -36,18 +39,35 @@ async def _claim_batch(
 ) -> list[tuple[int, str]]:
     """Return (id, domain) pairs needing a fresh Wayback summary.
 
-    Ranks by MAX(sources.authority) across all source_mentions; takes top_n
-    overall, then slices the first batch_size from that pool that need work.
+    Only real, currently active acquisition inventory is eligible. Research
+    candidates are checked first, then the remaining authority-ranked pool.
     """
     sql = text(
         """
         WITH ranked AS (
-            SELECT c.id, c.domain, COALESCE(MAX(s.authority), 0) AS auth
+            SELECT c.id, c.domain, oa.verdict, oa.overall_score
             FROM candidates c
-            LEFT JOIN source_mentions sm ON sm.candidate_id = c.id
-            LEFT JOIN sources s ON s.id = sm.source_id
-            GROUP BY c.id, c.domain
-            ORDER BY auth DESC NULLS LAST
+            JOIN opportunity_assessments oa
+              ON oa.candidate_id = c.id
+             AND oa.model_version = :model_version
+            WHERE c.open_pagerank >= :opr_floor
+              AND COALESCE((
+                  SELECT o.decision
+                  FROM outcomes o
+                  WHERE o.candidate_id = c.id
+                  ORDER BY o.decided_at DESC, o.id DESC
+                  LIMIT 1
+              ), '') NOT IN ('passed', 'bought', 'lost_to_other')
+              AND EXISTS (
+                  SELECT 1 FROM marketplace_listings ml
+                  WHERE ml.candidate_id = c.id
+                    AND ml.listing_status = 'active'
+                    AND ml.drop_date >= current_date - 1
+              )
+            ORDER BY
+                CASE oa.verdict WHEN 'research' THEN 0 WHEN 'observe' THEN 1 ELSE 2 END,
+                oa.overall_score DESC,
+                c.authority_rank ASC NULLS LAST
             LIMIT :top_n
         )
         SELECT r.id, r.domain
@@ -57,18 +77,26 @@ async def _claim_batch(
             WHERE w.candidate_id = r.id
               AND w.observed_at > now() - (:stale || ' days')::interval
         )
+        ORDER BY
+            CASE r.verdict WHEN 'research' THEN 0 WHEN 'observe' THEN 1 ELSE 2 END,
+            r.overall_score DESC
         LIMIT :lim
         """
     )
     res = await session.execute(
-        sql, {"top_n": top_n, "stale": str(STALE_AFTER_DAYS), "lim": batch_size}
+        sql,
+        {
+            "top_n": top_n,
+            "stale": str(STALE_AFTER_DAYS),
+            "lim": batch_size,
+            "model_version": MODEL_VERSION,
+            "opr_floor": settings.inventory_min_opr,
+        },
     )
     return [(row[0], row[1]) for row in res.all()]
 
 
 async def _persist(session: AsyncSession, candidate_id: int, cdx: CdxSummary) -> None:
-    if cdx.capture_count == 0:
-        return
     session.add(
         WaybackSnapshot(
             candidate_id=candidate_id,
@@ -79,6 +107,7 @@ async def _persist(session: AsyncSession, candidate_id: int, cdx: CdxSummary) ->
                 "first_capture_ts": cdx.first_capture,
                 "last_capture_ts": cdx.last_capture,
                 "entries_sampled": len(cdx.entries),
+                "metric": "unique_200_status_urls",
             },
         )
     )
@@ -115,9 +144,7 @@ async def run_batch(*, batch_size: int, top_n: int, concurrency: int = 4) -> int
 async def _run(shutdown: asyncio.Event, interval_seconds: float) -> None:
     while not shutdown.is_set():
         try:
-            await run_batch(
-                batch_size=settings.wayback_batch_size, top_n=settings.wayback_top_n
-            )
+            await run_batch(batch_size=settings.wayback_batch_size, top_n=settings.wayback_top_n)
         except Exception as e:
             log.error("worker.wayback.batch.error", error=str(e))
         try:

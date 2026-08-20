@@ -1,6 +1,9 @@
 """Integration test for the Wayback enrichment worker."""
+
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 import os
 import shutil
 from collections.abc import AsyncIterator, Iterator
@@ -34,7 +37,7 @@ def postgres_url() -> Iterator[str]:
         yield async_url
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
     engine = create_async_engine(postgres_url)
     from alembic.config import Config
@@ -46,7 +49,7 @@ async def migrated_engine(postgres_url: str) -> AsyncIterator[object]:
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", sync_url)
-    command.upgrade(cfg, "head")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
     yield engine
     await engine.dispose()
 
@@ -66,22 +69,41 @@ async def patched_engine(migrated_engine: object) -> AsyncIterator[None]:
 @pytest.mark.integration
 async def test_wayback_worker_writes_snapshot(patched_engine: None) -> None:
     from dh.db.engine import session_scope
-    from dh.db.models import Candidate, Source, SourceMention, WaybackSnapshot
+    from dh.db.models import (
+        Candidate,
+        MarketplaceListing,
+        OpportunityAssessment,
+        WaybackSnapshot,
+    )
+    from dh.opportunity import MODEL_VERSION
     from dh.sources.wayback.cdx import CdxSummary
     from dh.workers import wayback as worker
 
     async with session_scope() as session:
-        c = Candidate(domain="wb-test.example")
-        s = Source(kind="github_readme", source_uri="github:a/b", authority=10000)
-        session.add_all([c, s])
+        c = Candidate(domain="wb-test.example", open_pagerank=3.0)
+        session.add(c)
         await session.flush()
-        session.add(
-            SourceMention(
-                candidate_id=c.id,
-                source_id=s.id,
-                source_url="https://github.com/a/b",
-                cited_url="https://wb-test.example/",
-            )
+        session.add_all(
+            [
+                MarketplaceListing(
+                    candidate_id=c.id,
+                    marketplace="test",
+                    external_key="wb-test.example:test",
+                    acquisition_type="backorder",
+                    listing_status="active",
+                    drop_date=dt.date.today() + dt.timedelta(days=1),
+                ),
+                OpportunityAssessment(
+                    candidate_id=c.id,
+                    model_version=MODEL_VERSION,
+                    authority_score=50,
+                    resale_score=50,
+                    risk_score=10,
+                    confidence_score=50,
+                    overall_score=50,
+                    verdict="research",
+                ),
+            ]
         )
 
     async def _fake(domain: str) -> CdxSummary:

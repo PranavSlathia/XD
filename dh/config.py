@@ -1,4 +1,5 @@
 """Typed settings loaded from environment / .env file."""
+
 from __future__ import annotations
 
 from functools import cached_property
@@ -66,6 +67,19 @@ class Settings(BaseSettings):
     # --- DomCop Open PageRank ---
     openpagerank_api_key: str = ""
 
+    # --- Continuous expiring-inventory discovery ---
+    inventory_data_dir: Path = Path("/var/data/dh")
+    inventory_interval_hours: int = 6
+    inventory_tlds: str = "com"
+    inventory_min_opr: float = 2.5
+    inventory_min_referring_domains: int = 10
+    inventory_max_candidates: int = 500
+    inventory_detail_limit: int = 150
+    inventory_reference_refresh_days: int = 30
+    namebio_retail_stats_refresh_hours: int = 24
+    opportunity_research_threshold: float = 45.0
+    opportunity_min_keyword_sales: int = 10
+
     # --- Porkbun registrar quote lookup ---
     porkbun_api_key: str = ""
     porkbun_secret_api_key: str = ""
@@ -88,6 +102,10 @@ class Settings(BaseSettings):
 
     rdap_batch_size: int = 100
     rdap_interval_minutes: int = 10
+    rdap_active_stale_hours: int = 12
+    rdap_available_stale_hours: int = 24
+    rdap_registered_stale_days: int = 30
+    rdap_unknown_stale_days: int = 7
 
     wayback_batch_size: int = 50
     wayback_top_n: int = 200
@@ -107,6 +125,8 @@ class Settings(BaseSettings):
     # Leave empty for a console exporter only (dev-friendly, low overhead).
     otel_exporter_otlp_endpoint: str = ""
     otel_service_namespace: str = "domain-hunter"
+    otel_console_exporter: bool = False
+    otel_sample_rate: float = Field(default=0.05, ge=0.0, le=1.0)
 
     # --- Notifications ---
     digest_min_score: int = 70

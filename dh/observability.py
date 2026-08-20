@@ -6,11 +6,13 @@ is unset, so dev / tests pay no cost.
 ``setup_tracing()`` initialises OpenTelemetry. Auto-instruments FastAPI,
 HTTPX, SQLAlchemy. Exporter behaviour:
   - DH_OTEL_EXPORTER_OTLP_ENDPOINT set → OTLP HTTP exporter to that endpoint
-  - otherwise → ConsoleSpanExporter (visible in logs, zero infra needed)
+  - DH_OTEL_CONSOLE_EXPORTER=true → ConsoleSpanExporter (development only)
+  - otherwise → disabled
 
 Tracing is enabled by default for low overhead, with a sampling rate of 5%
 to keep stdout noise manageable. Tune via DH_OTEL_SAMPLE_RATE.
 """
+
 from __future__ import annotations
 
 from dh.config import settings
@@ -43,6 +45,8 @@ def setup_tracing(*, service: str) -> None:
     global _otel_setup_done
     if _otel_setup_done:
         return
+    if not settings.otel_exporter_otlp_endpoint and not settings.otel_console_exporter:
+        return
     try:
         from opentelemetry import trace
         from opentelemetry.sdk.resources import Resource
@@ -61,7 +65,8 @@ def setup_tracing(*, service: str) -> None:
             }
         )
         provider = TracerProvider(
-            resource=resource, sampler=TraceIdRatioBased(0.05)
+            resource=resource,
+            sampler=TraceIdRatioBased(settings.otel_sample_rate),
         )
         if settings.otel_exporter_otlp_endpoint:
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
@@ -71,8 +76,10 @@ def setup_tracing(*, service: str) -> None:
             exporter = OTLPSpanExporter(
                 endpoint=f"{settings.otel_exporter_otlp_endpoint.rstrip('/')}/v1/traces"
             )
-        else:
+        elif settings.otel_console_exporter:
             exporter = ConsoleSpanExporter()  # type: ignore[assignment]
+        else:
+            return
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
 
@@ -98,6 +105,7 @@ def setup_tracing(*, service: str) -> None:
             "otel.enabled",
             service=service,
             exporter=("otlp" if settings.otel_exporter_otlp_endpoint else "console"),
+            sample_rate=settings.otel_sample_rate,
         )
     except Exception as e:
         log.warning("otel.init.failed", error=str(e))

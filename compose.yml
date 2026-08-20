@@ -79,21 +79,7 @@ services:
     labels:
       autoheal: "true"
 
-  dh-scheduler:
-    build: { context: ., dockerfile: Dockerfile.python }
-    container_name: dh-scheduler
-    restart: unless-stopped
-    command: ["uv", "run", "python", "-m", "dh.workers.scheduler"]
-    env_file: .env
-    depends_on:
-      dh-pg: { condition: service_healthy }
-      dh-redis: { condition: service_healthy }
-    networks: [dh-net]
-    labels:
-      autoheal: "true"
-
   # Vulture - the Discord slash-command operator surface.
-  # No autoheal label: it has no HTTP healthcheck.
   vulture:
     build: { context: ., dockerfile: Dockerfile.python }
     container_name: vulture
@@ -103,11 +89,20 @@ services:
     depends_on:
       dh-pg: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.bot' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      autoheal: "true"
 
   dh-worker-a2:
     build: { context: ., dockerfile: Dockerfile.python }
     container_name: dh-worker-a2
     restart: unless-stopped
+    profiles: ["experimental"]
     command: ["uv", "run", "python", "-m", "dh.workers.a2"]
     env_file: .env
     volumes:
@@ -116,6 +111,35 @@ services:
       dh-pg: { condition: service_healthy }
       dh-redis: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.a2' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      autoheal: "true"
+
+  # Primary discovery path: official pending-delete inventory intersected with
+  # a current authority dataset. Read-only; it cannot place bids or purchases.
+  dh-worker-inventory:
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-worker-inventory
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.inventory"]
+    env_file: .env
+    volumes:
+      - /var/data/dh:/var/data/dh
+    depends_on:
+      dh-pg: { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.inventory' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     labels:
       autoheal: "true"
 
@@ -129,6 +153,12 @@ services:
       dh-pg: { condition: service_healthy }
       dh-redis: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.rdap' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     labels:
       autoheal: "true"
 
@@ -142,6 +172,12 @@ services:
       dh-pg: { condition: service_healthy }
       dh-redis: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.wayback' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     labels:
       autoheal: "true"
 
@@ -149,12 +185,19 @@ services:
     build: { context: ., dockerfile: Dockerfile.python }
     container_name: dh-worker-classifier
     restart: unless-stopped
+    profiles: ["experimental"]
     command: ["uv", "run", "python", "-m", "dh.workers.classifier"]
     env_file: .env
     depends_on:
       dh-pg: { condition: service_healthy }
       dh-redis: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.classifier' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     labels:
       autoheal: "true"
 
@@ -168,6 +211,12 @@ services:
       dh-pg: { condition: service_healthy }
       dh-redis: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.scoring' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     labels:
       autoheal: "true"
 
@@ -175,11 +224,18 @@ services:
     build: { context: ., dockerfile: Dockerfile.python }
     container_name: dh-worker-registrar
     restart: unless-stopped
+    profiles: ["hand-registration"]
     command: ["uv", "run", "python", "-m", "dh.workers.registrar"]
     env_file: .env
     depends_on:
       dh-pg: { condition: service_healthy }
       dh-redis: { condition: service_healthy }
     networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.registrar' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     labels:
       autoheal: "true"

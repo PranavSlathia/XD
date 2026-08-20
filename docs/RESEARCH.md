@@ -1,4 +1,8 @@
-# Domain Hunter — Research Dossier
+# Domain Hunter — historical research dossier
+
+> **Historical record, not an operating plan.** Market facts and vendor terms
+> can age quickly. The evidence model now in production is documented in
+> `docs/ALWAYS_ON_PIPELINE.md`.
 
 > Consolidated research for a self-hosted expired-domain + brandable-domain discovery / scoring / acquisition pipeline.
 > Two passes complete (high-level market + deep methodology). All sources cited inline.

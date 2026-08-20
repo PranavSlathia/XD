@@ -7,24 +7,30 @@ dataclasses (not ORM rows) so the embed builders + tests never touch a session.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, exists, select
+from sqlalchemy.orm import aliased
 
 from dh.config import settings
 from dh.db.engine import session_scope
 from dh.db.models import (
     AvailabilityCheck,
     Candidate,
+    MarketplaceListing,
+    OpportunityAssessment,
     Outcome,
     RegistrarQuote,
     ScoringWeights,
     SourceMention,
     WaybackSnapshot,
 )
+from dh.opportunity import MODEL_VERSION
 
 DIGEST_STATUSES = ("available", "pending_delete", "redemption_period", "expiring_soon")
 DECISIONS = ("bought", "passed", "watching", "needs_manual_review", "lost_to_other")
+TERMINAL_DECISIONS = ("passed", "bought", "lost_to_other")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -34,6 +40,8 @@ class ShortlistItem:
     current_status: str | None
     quote_price_micros: int | None
     top_reasons: list[str]
+    closes_at: str | None = None
+    missing_evidence: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -107,41 +115,73 @@ def _candidate_row(cand: Candidate) -> CandidateRow:
 
 
 async def fetch_shortlist(limit: int | None = None) -> list[ShortlistItem]:
-    """Today's ranked, buyable, non-premium shortlist (ports scheduler._gather_digest)."""
+    """Today's acquisition-backed research queue; never an instruction to buy."""
     cap = limit or settings.digest_max_items
     out: list[ShortlistItem] = []
     async with session_scope() as session:
-        stmt = (
-            select(Candidate)
-            .where(
-                Candidate.composite_score >= settings.digest_min_score,
-                Candidate.hard_filtered.is_(False),
-                Candidate.availability_confidence == "authoritative",
-                Candidate.current_status.in_(DIGEST_STATUSES),
+        active_listing = exists(
+            select(MarketplaceListing.id).where(
+                MarketplaceListing.candidate_id == Candidate.id,
+                MarketplaceListing.listing_status == "active",
+                MarketplaceListing.drop_date >= dt.date.today() - dt.timedelta(days=1),
             )
-            .order_by(desc(Candidate.composite_score))
+        )
+        latest_outcome = aliased(Outcome)
+        terminal_outcome = aliased(Outcome)
+        latest_outcome_id = (
+            select(latest_outcome.id)
+            .where(latest_outcome.candidate_id == Candidate.id)
+            .order_by(desc(latest_outcome.decided_at), desc(latest_outcome.id))
+            .limit(1)
+            .correlate_except(latest_outcome)
+            .scalar_subquery()
+        )
+        terminal_decision = exists(
+            select(terminal_outcome.id)
+            .where(
+                terminal_outcome.id == latest_outcome_id,
+                terminal_outcome.decision.in_(TERMINAL_DECISIONS),
+            )
+            .correlate_except(terminal_outcome)
+        )
+        stmt = (
+            select(Candidate, OpportunityAssessment)
+            .join(OpportunityAssessment, OpportunityAssessment.candidate_id == Candidate.id)
+            .where(
+                OpportunityAssessment.model_version == MODEL_VERSION,
+                OpportunityAssessment.verdict == "research",
+                active_listing,
+                ~terminal_decision,
+            )
+            .order_by(desc(OpportunityAssessment.overall_score))
             .limit(cap)
         )
-        for cand in (await session.execute(stmt)).scalars().all():
-            rq = (
+        for cand, assessment in (await session.execute(stmt)).all():
+            listing = (
                 await session.execute(
-                    select(RegistrarQuote)
-                    .where(RegistrarQuote.candidate_id == cand.id)
-                    .order_by(desc(RegistrarQuote.observed_at))
+                    select(MarketplaceListing)
+                    .where(
+                        MarketplaceListing.candidate_id == cand.id,
+                        MarketplaceListing.listing_status == "active",
+                        MarketplaceListing.drop_date >= dt.date.today() - dt.timedelta(days=1),
+                    )
+                    .order_by(desc(MarketplaceListing.last_seen))
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if rq is None or rq.is_premium is True or rq.quote_price_micros is None:
-                continue
-            if rq.quote_price_micros >= settings.premium_ceiling_micros:
+            if listing is None:
                 continue
             out.append(
                 ShortlistItem(
                     domain=cand.domain,
-                    composite_score=_as_float(cand.composite_score),
+                    composite_score=_as_float(assessment.overall_score),
                     current_status=cand.current_status,
-                    quote_price_micros=rq.quote_price_micros,
-                    top_reasons=list(cand.top_reasons or []),
+                    quote_price_micros=(
+                        listing.current_price_micros or listing.minimum_price_micros
+                    ),
+                    top_reasons=list(assessment.reasons or []),
+                    closes_at=str(listing.closes_at) if listing.closes_at else None,
+                    missing_evidence=list(assessment.missing_evidence or []),
                 )
             )
     return out

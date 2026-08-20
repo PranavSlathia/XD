@@ -69,6 +69,12 @@ jobs:
           set -euo pipefail
           uv run pytest tests/ -q
 
+      - name: Tests (Postgres integration)
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          uv run pytest tests/ -m integration -q
+
   build:
     needs: test
     if: github.repository == 'PranavSlathia/XD' && github.event_name != 'pull_request'
@@ -89,6 +95,13 @@ jobs:
           set -euo pipefail
           docker compose build
 
+      - name: Back up Domain Hunter database
+        working-directory: /home/pronav/docker/domain-hunter
+        run: |
+          set -euo pipefail
+          docker compose up -d dh-pg
+          ./scripts/backup-dh-pg.sh
+
       - name: Run database migrations
         working-directory: /home/pronav/docker/domain-hunter
         run: |
@@ -101,6 +114,13 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f dh-web 2>/dev/null || true
+
+      - name: Remove retired or opt-in workers
+        run: |
+          set -euo pipefail
+          for container in dh-scheduler dh-worker-a2 dh-worker-classifier dh-worker-registrar; do
+            docker rm -f "$container" 2>/dev/null || true
+          done
 
       - name: Deploy backend stack
         working-directory: /home/pronav/docker/domain-hunter
@@ -126,7 +146,10 @@ jobs:
             docker logs --tail 120 dh-api || true
             exit 1
           fi
-          docker compose ps dh-api dh-pg dh-redis vulture
+          curl -fsS http://127.0.0.1:8007/api/pipeline/status
+          docker compose ps \
+            dh-api dh-pg dh-redis vulture \
+            dh-worker-inventory dh-worker-rdap dh-worker-wayback dh-worker-scoring
           if docker ps -a --format '{{.Names}}' | grep -qx 'dh-web'; then
             echo "retired dh-web container still exists"
             exit 1
@@ -136,3 +159,10 @@ jobs:
             docker logs --tail 120 vulture || true
             exit 1
           fi
+          for service in dh-worker-inventory dh-worker-rdap dh-worker-wayback dh-worker-scoring; do
+            if ! docker compose ps --services --filter status=running | grep -qx "$service"; then
+              echo "$service is not running; recent logs:"
+              docker logs --tail 120 "$service" || true
+              exit 1
+            fi
+          done

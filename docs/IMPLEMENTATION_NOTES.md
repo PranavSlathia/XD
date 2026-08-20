@@ -1,4 +1,8 @@
-# Domain Hunter — Implementation Notes (Audit Pass)
+# Domain Hunter — historical implementation audit
+
+> **Historical record.** This audit predates the always-on pending-delete
+> inventory worker. Current runtime and source contracts are in
+> `docs/ALWAYS_ON_PIPELINE.md` and the code.
 
 > Audit of 8 open-source repos + WHOIS-API matrix. Companion to PRD.md and RESEARCH.md.
 > Date: 2026-05-14. All clones under `/tmp/dh-audit/` were inspected then deleted.

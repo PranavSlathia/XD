@@ -1,9 +1,12 @@
-"""DomCop Open PageRank client.
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
+"""OpenPageRank API client with the 2026 endpoint and legacy-key fallback.
 
-API: GET https://openpagerank.com/api/v1.0/getPageRank?domains[]=...
-     header: API-OPR: <key>
-Batch up to 100 domains per call. Free, unlimited with key (rate limit ~600/min).
+New keys (``opr_*``) use Keywords Everywhere's bearer-authenticated bulk API.
+The legacy DomCop endpoint remains supported only so an existing installation
+does not fail abruptly before that service is retired on 2026-09-30. Primary
+inventory discovery uses the published Top-10-Million dataset and needs no key.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -21,8 +24,9 @@ from tenacity import (
 from dh.config import settings
 from dh.logging import log
 
-_OPR_URL = "https://openpagerank.com/api/v1.0/getPageRank"
-_LIMITER = AsyncLimiter(max_rate=300, time_period=60)  # well under 600/min
+_NEW_OPR_URL = "https://openpagerank.keywordseverywhere.com/v1/domains/bulk"
+_LEGACY_OPR_URL = "https://openpagerank.com/api/v1.0/getPageRank"
+_LIMITER = AsyncLimiter(max_rate=50, time_period=60)
 
 
 class OPRResult(BaseModel):
@@ -30,6 +34,7 @@ class OPRResult(BaseModel):
     rank: int | None = None
     page_rank_integer: int | None = None
     page_rank_decimal: float | None = None
+    referring_domains: int | None = None
     status_code: int | None = None
     error: str | None = None
     found: bool = False
@@ -40,64 +45,126 @@ class OPRBatchResult(BaseModel):
     api_cost_micros: int = 0
 
 
+def _as_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _as_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
 @retry(
     retry=retry_if_exception_type(httpx.HTTPError),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=2, max=30),
+    reraise=True,
 )
-async def _opr_chunk(
-    client: httpx.AsyncClient, chunk: Sequence[str]
-) -> list[OPRResult]:
+async def _opr_chunk_new(client: httpx.AsyncClient, chunk: Sequence[str]) -> list[OPRResult]:
     async with _LIMITER:
-        resp = await client.get(
-            _OPR_URL,
+        response = await client.post(
+            _NEW_OPR_URL,
+            headers={"Authorization": f"Bearer {settings.openpagerank_api_key}"},
+            json={"domains": list(chunk), "include_history": False},
+            timeout=30,
+        )
+        response.raise_for_status()
+        body = response.json()
+    output: list[OPRResult] = []
+    for row in body.get("results", []):
+        score = _as_float(row.get("open_page_rank"))
+        found = row.get("found") is True and score is not None
+        output.append(
+            OPRResult(
+                domain=str(row.get("domain") or ""),
+                rank=_as_int(row.get("rank")),
+                page_rank_integer=(int(score) if score is not None else None),
+                page_rank_decimal=score,
+                referring_domains=_as_int(row.get("referring_domains")),
+                status_code=200,
+                found=found,
+            )
+        )
+    return output
+
+
+@retry(
+    retry=retry_if_exception_type(httpx.HTTPError),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    reraise=True,
+)
+async def _opr_chunk_legacy(client: httpx.AsyncClient, chunk: Sequence[str]) -> list[OPRResult]:
+    async with _LIMITER:
+        response = await client.get(
+            _LEGACY_OPR_URL,
             params={"domains[]": list(chunk)},
             headers={"API-OPR": settings.openpagerank_api_key},
             timeout=30,
         )
-        resp.raise_for_status()
-        body = resp.json()
-    out: list[OPRResult] = []
-    for r in body.get("response", []):
-        domain = r.get("domain", "")
-        out.append(
+        response.raise_for_status()
+        body = response.json()
+    output: list[OPRResult] = []
+    for row in body.get("response", []):
+        score = _as_float(row.get("page_rank_decimal"))
+        status_code = _as_int(row.get("status_code"))
+        output.append(
             OPRResult(
-                domain=domain,
-                rank=r.get("rank") if isinstance(r.get("rank"), int) else None,
-                page_rank_integer=r.get("page_rank_integer"),
-                page_rank_decimal=(
-                    float(r["page_rank_decimal"])
-                    if r.get("page_rank_decimal") not in (None, "")
-                    else None
-                ),
-                status_code=r.get("status_code"),
-                error=r.get("error") or None,
-                found=r.get("status_code") == 200,
+                domain=str(row.get("domain") or ""),
+                rank=_as_int(row.get("rank")),
+                page_rank_integer=_as_int(row.get("page_rank_integer")),
+                page_rank_decimal=score,
+                status_code=status_code,
+                error=(str(row["error"]) if row.get("error") else None),
+                found=status_code == 200 and score is not None,
             )
         )
-    return out
+    return output
 
 
 async def fetch_open_pagerank(domains: Sequence[str]) -> OPRBatchResult:
-    """Look up Open PageRank for any number of domains. Batches in 100s."""
+    """Look up OpenPageRank for any number of domains, in batches of 100."""
     if not settings.openpagerank_api_key:
         log.warning(
             "openpagerank.no_key",
-            note="DH_OPENPAGERANK_API_KEY empty; returning empty results",
+            note="API enrichment disabled; inventory still uses the public reference dataset",
         )
         return OPRBatchResult(
-            results=[OPRResult(domain=d, error="no_api_key") for d in domains]
+            results=[OPRResult(domain=domain, error="no_api_key") for domain in domains]
+        )
+
+    is_new_key = settings.openpagerank_api_key.startswith("opr_")
+    if not is_new_key:
+        log.warning(
+            "openpagerank.legacy_key",
+            retirement_date="2026-09-30",
+            action="replace DH_OPENPAGERANK_API_KEY with an opr_* key",
         )
 
     results: list[OPRResult] = []
     async with httpx.AsyncClient(timeout=30) as client:
-        for i in range(0, len(domains), 100):
-            chunk = domains[i : i + 100]
+        for index in range(0, len(domains), 100):
+            chunk = domains[index : index + 100]
             try:
-                results.extend(await _opr_chunk(client, chunk))
-            except httpx.HTTPError as e:
-                log.warning("openpagerank.error", n=len(chunk), error=str(e))
-                results.extend(
-                    OPRResult(domain=d, error=str(e)) for d in chunk
-                )
+                if is_new_key:
+                    results.extend(await _opr_chunk_new(client, chunk))
+                else:
+                    results.extend(await _opr_chunk_legacy(client, chunk))
+            except httpx.HTTPError as exc:
+                log.warning("openpagerank.error", n=len(chunk), error=str(exc))
+                results.extend(OPRResult(domain=domain, error=str(exc)) for domain in chunk)
     return OPRBatchResult(results=results)

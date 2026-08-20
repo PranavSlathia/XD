@@ -1,8 +1,9 @@
 """Pydantic v2 schemas for the headless FastAPI surface."""
+
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +16,10 @@ class CandidateListItem(BaseModel):
     composite_score: float | None
     current_status: str | None
     availability_confidence: str | None
+    open_pagerank: float | None
+    referring_domains: int | None
+    authority_rank: int | None
+    authority_source: str | None
     score_version: int | None
     hard_filtered: bool
     hard_filter_reason: str | None
@@ -62,7 +67,7 @@ class CandidateDetail(CandidateListItem):
 
 class DecisionCreate(BaseModel):
     domain: str
-    decision: str  # 'bought'|'passed'|'watching'|'needs_manual_review'|'lost_to_other'
+    decision: Literal["bought", "passed", "watching", "needs_manual_review", "lost_to_other"]
     pass_reason: str | None = None
     notes: str | None = None
     acquisition_cost_usd: float | None = None
@@ -99,4 +104,72 @@ class CandidateDigestItem(BaseModel):
     composite_score: float | None = None
     current_status: str | None = None
     quote_price_micros: int | None = None
+    closes_at: dt.datetime | None = None
+    verdict: str = "research"
+    missing_evidence: list[str] = Field(default_factory=list)
     top_reasons: list[str] = Field(default_factory=list)
+
+
+class MarketplaceEvidence(BaseModel):
+    marketplace: str
+    acquisition_type: str
+    listing_status: str
+    drop_date: dt.date | None
+    closes_at: dt.datetime | None
+    minimum_price_micros: int | None
+    current_price_micros: int | None
+    currency: str
+    listing_url: str | None
+    last_seen: dt.datetime
+
+
+class OpportunityItem(BaseModel):
+    candidate_id: int
+    domain: str
+    verdict: str
+    overall_score: float
+    authority_score: float
+    resale_score: float
+    risk_score: float
+    confidence_score: float
+    open_pagerank: float | None
+    referring_domains: int | None
+    authority_rank: int | None
+    current_status: str | None
+    availability_confidence: str | None
+    reasons: list[str] = Field(default_factory=list)
+    rejection_reasons: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    signals: dict[str, Any] = Field(default_factory=dict)
+    computed_at: dt.datetime
+    latest_decision: str | None = None
+    acquisition: MarketplaceEvidence | None = None
+    wayback: WaybackEvidence | None = None
+
+
+class DiscoveryRunItem(BaseModel):
+    id: int
+    source: str
+    started_at: dt.datetime
+    finished_at: dt.datetime | None
+    status: str
+    source_version: str | None
+    fetched_count: int
+    prefiltered_count: int
+    matched_count: int
+    persisted_count: int
+    metrics: dict[str, Any] | None
+    error: str | None
+
+
+class PipelineStatus(BaseModel):
+    last_run: DiscoveryRunItem | None
+    active_acquisition_candidates: int
+    research_queue: int
+    observe_queue: int
+    rejected: int
+    manually_closed: int
+    rdap_confirmation_pending: int
+    wayback_review_pending: int
+    automated_purchase_enabled: bool = False
+    human_approval_required: bool = True

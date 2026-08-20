@@ -5,6 +5,7 @@ Free; no key; polite at ~5 req/s.
 
 Replaces `tomnomnom/waybackurls` (unlicensed + dead Common Crawl index).
 """
+
 from __future__ import annotations
 
 import httpx
@@ -25,7 +26,7 @@ _LIMITER = AsyncLimiter(max_rate=4, time_period=1)
 
 class CdxEntry(BaseModel):
     urlkey: str
-    timestamp: str    # YYYYMMDDHHMMSS
+    timestamp: str  # YYYYMMDDHHMMSS
     original: str
     mimetype: str | None = None
     statuscode: int | None = None
@@ -68,6 +69,7 @@ def _parse_row(headers: list[str], row: list[str]) -> CdxEntry | None:
     retry=retry_if_exception_type(httpx.HTTPError),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=2, max=30),
+    reraise=True,
 )
 async def fetch_cdx(domain: str, *, limit: int = 10_000) -> CdxSummary:
     """Return a CDX summary for `domain`.

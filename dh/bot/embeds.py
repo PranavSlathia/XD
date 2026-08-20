@@ -26,20 +26,29 @@ def _opr(opr: float | None) -> str:
 
 
 def shortlist_item_embed(item: ShortlistItem) -> discord.Embed:
-    """One candidate card for the daily shortlist (carries decision buttons)."""
+    """One research card. Any acquisition remains an explicit human action."""
     embed = discord.Embed(
         title=item.domain,
         description=(
-            f"**score** {fmt_score(item.composite_score)} · "
+            f"**research score** {fmt_score(item.composite_score)} · "
             f"**status** {item.current_status or 'unknown'} · "
             f"**price** {fmt_price(item.quote_price_micros)}"
         ),
-        color=_OK,
+        color=_WARN,
     )
     if item.top_reasons:
         embed.add_field(
             name="Why", value="\n".join(f"• {r}" for r in item.top_reasons[:6]), inline=False
         )
+    if item.closes_at:
+        embed.add_field(name="Deadline", value=item.closes_at, inline=False)
+    if item.missing_evidence:
+        embed.add_field(
+            name="Required before acquisition",
+            value="\n".join(f"• {value}" for value in item.missing_evidence[:6]),
+            inline=False,
+        )
+    embed.set_footer(text="Research only · no bid or purchase is placed by Domain Hunter")
     return embed
 
 

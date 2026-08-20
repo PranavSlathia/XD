@@ -1,4 +1,5 @@
 """Tests for the deterministic helpers inside dh.sources.rdap.client."""
+
 from __future__ import annotations
 
 from typing import Any, cast
@@ -9,6 +10,13 @@ from dh.sources.rdap.client import (
     _tld_of,
     _whoisjson_status,
 )
+from dh.workers.rdap import _expiry_to_date
+
+
+def test_expiry_date_parser() -> None:
+    assert str(_expiry_to_date("2027-01-02T03:04:05Z")) == "2027-01-02"
+    assert str(_expiry_to_date("2027-01-02")) == "2027-01-02"
+    assert _expiry_to_date("not-a-date") is None
 
 
 def test_tld_of() -> None:
@@ -50,6 +58,7 @@ def test_epp_to_status_tolerates_non_string_element() -> None:
 # values are usually strings but some servers return lists.
 # --------------------------------------------------------------------------- #
 
+
 def test_coerce_registrar_plain_string() -> None:
     assert _coerce_registrar("GoDaddy.com, LLC") == "GoDaddy.com, LLC"
 
@@ -83,6 +92,7 @@ def test_coerce_registrar_unknown_scalar_is_none() -> None:
 # _whoisjson_status — WhoisJSON 'status' is normally "available"/"registered"
 # but some responses return a list of EPP status codes. Must never crash.
 # --------------------------------------------------------------------------- #
+
 
 def test_whoisjson_status_string() -> None:
     assert _whoisjson_status({"status": "Available"}) == "available"

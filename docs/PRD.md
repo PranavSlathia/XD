@@ -1,4 +1,8 @@
-# Domain Hunter — Product Requirements Document
+# Domain Hunter — historical product requirements
+
+> **Historical record.** The 2026-08-20 always-on inventory implementation
+> supersedes the dashboard, GitHub-first, CZDS-first, and 20–50 daily-candidate
+> assumptions below. The current contract is `docs/ALWAYS_ON_PIPELINE.md`.
 
 > v0.1 · 2026-05-14 · Personal use tool. Single operator. Tailscale-only.
 
