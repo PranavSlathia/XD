@@ -266,7 +266,7 @@ public struct XDClient: Sendable {
                 error: nil
             )
         },
-        fetchConfigs: { _, _ in [.preview] },
+        fetchConfigs: { _, _ in [.preview()] },
         createConfig: { _, _, request in .preview(config: request.config, version: 2) },
         activateConfig: { _, _, version in .preview(version: version) },
         pairDevice: { _, request in
@@ -473,4 +473,3 @@ public extension ConfigVersion {
         )
     }
 }
-

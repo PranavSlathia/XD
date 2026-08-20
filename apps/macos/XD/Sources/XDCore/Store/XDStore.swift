@@ -124,16 +124,16 @@ public final class XDStore {
         client: XDClient,
         tokenStore: SecureTokenStore,
         cache: CacheRepository,
-        notifications: NotificationService = NotificationService(),
-        loginItems: LoginItemController = LoginItemController(),
+        notifications: NotificationService? = nil,
+        loginItems: LoginItemController? = nil,
         defaults: UserDefaults = .standard,
         demo: Bool = false
     ) {
         self.client = client
         self.tokenStore = tokenStore
         self.cache = cache
-        self.notifications = notifications
-        self.loginItems = loginItems
+        self.notifications = notifications ?? NotificationService()
+        self.loginItems = loginItems ?? LoginItemController()
         self.defaults = defaults
         isDemo = demo
         serverAddress = defaults.string(forKey: Keys.serverAddress)
@@ -149,8 +149,8 @@ public final class XDStore {
             selectedCandidateID = XDFixtures.detail.id
             selectedDetail = XDFixtures.detail
             runs = XDFixtures.runs
-            configVersions = [.preview]
-            configDraft = ConfigDraft(version: .preview)
+            configVersions = [.preview()]
+            configDraft = ConfigDraft(version: .preview())
             connection = .online
         }
     }
