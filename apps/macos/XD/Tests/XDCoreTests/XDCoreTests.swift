@@ -26,13 +26,13 @@ final class XDCoreTests: XCTestCase {
         XCTAssertEqual(pending.pendingGates.count, 1)
     }
 
-    func testMissingGateCannotSilentlyEnableReady() throws {
+    func testMissingSharedGateCannotSilentlyEnableReady() throws {
         let encoded = try APICodec.encoder().encode(XDFixtures.detail)
         var object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
         var gates = try XCTUnwrap(object["gates"] as? [[String: Any]])
-        gates.removeAll { $0["gate_key"] as? String == "domain_specific_comps" }
+        gates.removeAll { $0["gate_key"] as? String == "history_clean" }
         object["gates"] = gates
         let changed = try JSONSerialization.data(withJSONObject: object)
         let missing = try APICodec.decoder().decode(CandidateDetail.self, from: changed)
