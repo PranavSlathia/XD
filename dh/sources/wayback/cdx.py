@@ -1,12 +1,14 @@
 """Wayback CDX API client — in-tree, polite-rate-limited.
 
 Endpoint: https://web.archive.org/cdx/search/cdx
-Free; no key; polite at ~5 req/s.
+Free; no key; polite at one request per second.
 
 Replaces `tomnomnom/waybackurls` (unlicensed + dead Common Crawl index).
 """
 
 from __future__ import annotations
+
+from typing import cast
 
 import httpx
 from aiolimiter import AsyncLimiter
@@ -18,10 +20,12 @@ from tenacity import (
     wait_exponential,
 )
 
-from dh.logging import log
-
 _CDX_URL = "https://web.archive.org/cdx/search/cdx"
-_LIMITER = AsyncLimiter(max_rate=4, time_period=1)
+_LIMITER = AsyncLimiter(max_rate=1, time_period=1)
+
+
+class WaybackSourceError(RuntimeError):
+    """The CDX response was successful HTTP but not valid CDX JSON."""
 
 
 class CdxEntry(BaseModel):
@@ -65,6 +69,15 @@ def _parse_row(headers: list[str], row: list[str]) -> CdxEntry | None:
     )
 
 
+def _string_row(value: object, *, domain: str, kind: str) -> list[str]:
+    if not isinstance(value, list):
+        raise WaybackSourceError(f"CDX {kind} for {domain} changed")
+    values = cast(list[object], value)
+    if not all(isinstance(item, str) for item in values):
+        raise WaybackSourceError(f"CDX {kind} for {domain} changed")
+    return cast(list[str], values)
+
+
 @retry(
     retry=retry_if_exception_type(httpx.HTTPError),
     stop=stop_after_attempt(3),
@@ -88,24 +101,24 @@ async def fetch_cdx(domain: str, *, limit: int = 10_000) -> CdxSummary:
     async with _LIMITER:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.get(_CDX_URL, params=params)
-        if resp.status_code != 200:
-            log.warning(
-                "wayback.cdx.non200",
-                domain=domain,
-                status=resp.status_code,
-            )
-            return CdxSummary(domain=domain)
+        resp.raise_for_status()
         try:
-            rows = resp.json()
-        except ValueError:
-            return CdxSummary(domain=domain)
+            payload = cast(object, resp.json())
+        except ValueError as exc:
+            raise WaybackSourceError(f"invalid CDX JSON for {domain}") from exc
 
-    if not rows:
+    if not isinstance(payload, list):
+        raise WaybackSourceError(f"CDX payload for {domain} was not a list")
+    if not payload:
         return CdxSummary(domain=domain)
 
-    headers = rows[0]
+    payload_rows = cast(list[object], payload)
+    headers = _string_row(payload_rows[0], domain=domain, kind="headers")
+    if not {"original", "timestamp"}.issubset(headers):
+        raise WaybackSourceError(f"CDX required headers for {domain} are missing")
     entries: list[CdxEntry] = []
-    for row in rows[1:]:
+    for row_value in payload_rows[1:]:
+        row = _string_row(row_value, domain=domain, kind="row schema")
         entry = _parse_row(headers, row)
         if entry:
             entries.append(entry)

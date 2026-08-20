@@ -116,7 +116,7 @@ async def _persist(session: AsyncSession, candidate_id: int, cdx: CdxSummary) ->
         cand.score_version = None
 
 
-async def run_batch(*, batch_size: int, top_n: int, concurrency: int = 4) -> int:
+async def run_batch(*, batch_size: int, top_n: int, concurrency: int = 2) -> int:
     async with session_scope() as session:
         rows = await _claim_batch(session, batch_size=batch_size, top_n=top_n)
     if not rows:
@@ -124,21 +124,28 @@ async def run_batch(*, batch_size: int, top_n: int, concurrency: int = 4) -> int
 
     sem = asyncio.Semaphore(concurrency)
 
-    async def _one(cid: int, domain: str) -> tuple[int, CdxSummary]:
+    async def _one(cid: int, domain: str) -> tuple[int, CdxSummary | None]:
         async with sem:
             try:
                 return cid, await fetch_cdx(domain)
             except Exception as e:
                 log.warning("worker.wayback.error", domain=domain, error=str(e))
-                return cid, CdxSummary(domain=domain)
+                return cid, None
 
     results = await asyncio.gather(*(_one(cid, d) for cid, d in rows))
-    async with session_scope() as session:
-        for cid, cdx in results:
-            await _persist(session, cid, cdx)
+    successful = [(cid, cdx) for cid, cdx in results if cdx is not None]
+    if successful:
+        async with session_scope() as session:
+            for cid, cdx in successful:
+                await _persist(session, cid, cdx)
 
-    log.info("worker.wayback.batch.done", processed=len(results))
-    return len(results)
+    log.info(
+        "worker.wayback.batch.done",
+        attempted=len(results),
+        processed=len(successful),
+        failed=len(results) - len(successful),
+    )
+    return len(successful)
 
 
 async def _run(shutdown: asyncio.Event, interval_seconds: float) -> None:

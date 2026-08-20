@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     rdap_registered_stale_days: int = 30
     rdap_unknown_stale_days: int = 7
 
-    wayback_batch_size: int = 50
+    wayback_batch_size: int = 20
     wayback_top_n: int = 200
     wayback_interval_minutes: int = 30
 

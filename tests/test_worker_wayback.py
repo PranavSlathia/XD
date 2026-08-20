@@ -124,3 +124,64 @@ async def test_wayback_worker_writes_snapshot(patched_engine: None) -> None:
         snaps = (await session.execute(select(WaybackSnapshot))).scalars().all()
     assert len(snaps) == 1
     assert snaps[0].capture_count == 5
+
+
+@pytest.mark.integration
+async def test_wayback_failure_writes_no_false_zero_snapshot(
+    patched_engine: None,
+) -> None:
+    from sqlalchemy import select
+
+    from dh.db.engine import session_scope
+    from dh.db.models import (
+        Candidate,
+        MarketplaceListing,
+        OpportunityAssessment,
+        WaybackSnapshot,
+    )
+    from dh.opportunity import MODEL_VERSION
+    from dh.workers import wayback as worker
+
+    async with session_scope() as session:
+        candidate = Candidate(domain="wb-failure-test.example", open_pagerank=3.0)
+        session.add(candidate)
+        await session.flush()
+        candidate_id = candidate.id
+        session.add_all(
+            [
+                MarketplaceListing(
+                    candidate_id=candidate_id,
+                    marketplace="test",
+                    external_key="wb-failure-test.example:test",
+                    acquisition_type="backorder",
+                    listing_status="active",
+                    drop_date=dt.date.today() + dt.timedelta(days=1),
+                ),
+                OpportunityAssessment(
+                    candidate_id=candidate_id,
+                    model_version=MODEL_VERSION,
+                    authority_score=50,
+                    resale_score=50,
+                    risk_score=10,
+                    confidence_score=50,
+                    overall_score=49,
+                    verdict="research",
+                ),
+            ]
+        )
+
+    with patch(
+        "dh.workers.wayback.fetch_cdx",
+        AsyncMock(side_effect=RuntimeError("upstream unavailable")),
+    ):
+        processed = await worker.run_batch(batch_size=10, top_n=10, concurrency=1)
+
+    async with session_scope() as session:
+        snapshots = (
+            await session.execute(
+                select(WaybackSnapshot).where(WaybackSnapshot.candidate_id == candidate_id)
+            )
+        ).scalars()
+
+    assert processed == 0
+    assert snapshots.first() is None

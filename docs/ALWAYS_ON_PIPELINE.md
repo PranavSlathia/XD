@@ -123,6 +123,8 @@ the daily research digest. A missing channel must not stop discovery.
 - Reference refresh failures use the last validated local copy and are visible in
   run metrics.
 - Per-domain detail failures produce a partial run, not a lost cycle.
+- Wayback transport/schema failures write no snapshot and remain pending for a
+  later bounded retry; a valid empty CDX response may still record zero captures.
 - Database writes are idempotent by marketplace external key and model version.
 - Old listings expire; old candidates and evidence remain for audit.
 - The latest human outcome overrides automation; terminal outcomes suppress
