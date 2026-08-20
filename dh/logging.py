@@ -22,6 +22,12 @@ def configure_logging() -> None:
         stream=sys.stdout,
         level=getattr(logging, settings.log_level),
     )
+    # HTTPX logs full request URLs at INFO. Bulk-download URLs can contain
+    # short-lived signatures, and per-domain enrichment would otherwise emit
+    # hundreds of low-value lines per cycle. Domain Hunter records its own
+    # bounded run metrics and errors instead.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     shared: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
