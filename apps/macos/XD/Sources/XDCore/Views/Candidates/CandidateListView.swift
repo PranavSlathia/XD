@@ -48,7 +48,7 @@ struct CandidateListView: View {
             }
         }
         .background(theme.canvas)
-        .navigationSplitViewColumnWidth(min: 290, ideal: 370, max: 450)
+        .navigationSplitViewColumnWidth(min: 290, ideal: 350, max: 430)
         .onChange(of: store.selectedCandidateID) { _, id in
             if let id { Task { await store.selectCandidate(id) } }
         }
@@ -58,7 +58,7 @@ struct CandidateListView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(store.selectedSection.title.uppercased())
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(theme.label)
                 Text("\(store.filteredCandidates.count) NEED ATTENTION")
                     .font(theme.mono(11, weight: .semibold))
@@ -120,15 +120,11 @@ private struct CandidateRow: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
-        .frame(minHeight: 92)
+        .frame(minHeight: 104)
         .background(selected ? theme.selected : theme.canvas)
-        .overlay(alignment: .leading) {
-            if selected { Rectangle().fill(theme.amber).frame(width: 3) }
-        }
         .overlay(alignment: .bottom) { Rectangle().fill(theme.line).frame(height: 1) }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(candidate.domain), \(candidate.laneLabel), \(candidate.reviewState.rawValue)")
     }
 }
-

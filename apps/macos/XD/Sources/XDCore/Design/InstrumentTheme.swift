@@ -63,7 +63,7 @@ public struct InstrumentButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(foreground)
-            .frame(maxWidth: .infinity, minHeight: 34)
+            .frame(maxWidth: .infinity, minHeight: 42)
             .padding(.horizontal, 14)
             .background(background.opacity(configuration.isPressed ? 0.72 : 1))
             .overlay {
@@ -134,4 +134,3 @@ struct StatusLamp: View {
         .accessibilityElement(children: .combine)
     }
 }
-

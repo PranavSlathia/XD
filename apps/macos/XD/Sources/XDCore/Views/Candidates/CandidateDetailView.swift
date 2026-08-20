@@ -38,16 +38,16 @@ struct CandidateDetailView: View {
                 header(detail)
                 Divider().overlay(theme.line)
                 lanePanels(detail)
-                    .padding(.horizontal, 28)
+                    .padding(.horizontal, 36)
                     .padding(.vertical, 20)
-                Text("NO COMPENSATING SCORE")
-                    .font(theme.mono(10, weight: .medium))
+                Text("No compensating score")
+                    .font(theme.mono(11, weight: .medium))
                     .foregroundStyle(theme.tertiaryLabel)
                     .frame(maxWidth: .infinity)
-                    .padding(.bottom, 14)
+                    .padding(.bottom, 16)
                 evidenceRows(detail)
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 28)
+                    .padding(.horizontal, 36)
+                    .padding(.bottom, 32)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -98,7 +98,7 @@ struct CandidateDetailView: View {
                     .foregroundStyle(detail.canBecomeReady ? theme.green : theme.amber)
             }
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 36)
         .padding(.vertical, 24)
     }
 
@@ -183,14 +183,15 @@ struct CandidateDetailView: View {
                 .foregroundStyle(theme.secondaryLabel)
                 .frame(width: 22)
             Text(title)
+                .font(.system(size: 15))
                 .foregroundStyle(theme.secondaryLabel)
             Spacer()
             Text(value)
-                .font(theme.mono(11, weight: .medium))
+                .font(theme.mono(13, weight: .medium))
                 .foregroundStyle(color)
                 .lineLimit(1)
         }
-        .frame(minHeight: 48)
+        .frame(minHeight: 58)
         .contentShape(Rectangle())
     }
 
@@ -223,8 +224,8 @@ struct CandidateDetailView: View {
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!detail.canBecomeReady || !store.canMutate || store.isMutating)
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 16)
+        .padding(.horizontal, 36)
+        .padding(.vertical, 18)
         .background(theme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 1) }
         .disabled(!store.canMutate || store.isMutating)
@@ -256,56 +257,164 @@ private struct LaneAssessmentPanel: View {
     let dossier: Dossier?
     let links: [LinkEvidence]
 
+    private struct MetricItem: Identifiable {
+        let key: String
+        let label: String
+        let value: String
+        var id: String { key }
+    }
+
     var body: some View {
         InstrumentPanel {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("\(assessment.lane.title.uppercased()) · \(assessment.state.uppercased())")
-                        .font(theme.mono(12, weight: .semibold))
+                    Text("\(assessment.lane.title.uppercased()) · \(displayState)")
+                        .font(theme.mono(14, weight: .semibold))
                         .foregroundStyle(theme.laneColor(assessment.lane))
                     Spacer()
-                    Image(systemName: assessment.missingEvidence.isEmpty ? "checkmark" : "clock")
-                        .foregroundStyle(assessment.missingEvidence.isEmpty ? theme.green : theme.amber)
                 }
                 .padding(16)
                 Divider().overlay(theme.line)
 
-                if assessment.lane == .name {
-                    metric("Subtype", assessment.nameSubtype.map { XDFormat.title(for: $0) } ?? "Unclassified")
-                    metric("Name quality", scoreLabel(assessment.laneScore))
-                    metric("Comparable sales", dossier?.comparableSales.isEmpty == false ? "Recorded" : "Pending")
-                    metric("Buyer thesis", dossier?.buyerThesis.isEmpty == false ? "Complete" : "Pending")
-                } else {
-                    let independent = Set(links.map(\.sourceDomain)).count
-                    let live = links.filter { $0.currentlyLive == true }.count
-                    metric("Independent sources", String(independent))
-                    metric("Currently live", String(live))
-                    metric("Editorial placement", links.allSatisfy { $0.isEditorial == true } ? "Verified" : "Review")
-                    metric("Topical context", dossier?.status == "complete" ? "Consistent" : "Pending")
+                ForEach(metrics) { item in
+                    metric(item.label, item.value)
                 }
 
+                Spacer(minLength: 0)
                 Divider().overlay(theme.line)
-                Text(dossier?.thesis ?? assessment.reasons.first ?? "Evidence collection in progress.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.secondaryLabel)
-                    .lineLimit(3)
-                    .padding(16)
-                    .frame(minHeight: 76, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 5) {
+                        Text("Evidence quality:")
+                            .foregroundStyle(theme.tertiaryLabel)
+                        Text(evidenceQuality)
+                            .foregroundStyle(evidenceQuality == "High" ? theme.secondaryLabel : theme.amber)
+                    }
+                    .font(.system(size: 13))
+                    Text(dossier?.thesis ?? assessment.reasons.first ?? "Evidence collection in progress.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.secondaryLabel)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(minHeight: 82, alignment: .topLeading)
             }
+            .frame(maxWidth: .infinity, minHeight: 382, alignment: .top)
         }
         .frame(maxWidth: .infinity)
     }
 
     private func metric(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).foregroundStyle(theme.secondaryLabel)
+            Text(label)
+                .font(.system(size: 14))
+                .foregroundStyle(theme.secondaryLabel)
             Spacer()
             Text(value)
-                .font(theme.mono(11, weight: .medium))
+                .font(theme.mono(13, weight: .medium))
                 .foregroundStyle(theme.green)
+                .lineLimit(1)
         }
         .padding(.horizontal, 16)
-        .frame(height: 39)
+        .frame(height: 35)
+    }
+
+    private var displayState: String {
+        if assessment.missingEvidence.isEmpty,
+           assessment.state == "qualified" || assessment.state == "ready" {
+            return "PASS"
+        }
+        return assessment.state.uppercased()
+    }
+
+    private var evidenceQuality: String {
+        assessment.missingEvidence.isEmpty && dossier?.status == "complete" ? "High" : "Pending"
+    }
+
+    private var metrics: [MetricItem] {
+        if assessment.lane == .name {
+            let preferred = [
+                ("exact_match", "Exact Match"),
+                ("trademark_check", "Trademark Check"),
+                ("search_interest", "Search Interest"),
+                ("type_in_potential", "Type-In Potential"),
+                ("name_quality", "Name Quality"),
+            ]
+            let resolved = preferred.compactMap(metricItem)
+            if resolved.count >= 3 { return resolved }
+            return [
+                MetricItem(
+                    key: "subtype",
+                    label: "Subtype",
+                    value: assessment.nameSubtype.map { XDFormat.title(for: $0) } ?? "Unclassified"
+                ),
+                MetricItem(key: "quality", label: "Name Quality", value: scoreLabel(assessment.laneScore)),
+                MetricItem(
+                    key: "comps",
+                    label: "Comparable Sales",
+                    value: dossier?.comparableSales.isEmpty == false ? "Recorded" : "Pending"
+                ),
+                MetricItem(
+                    key: "buyer",
+                    label: "Buyer Thesis",
+                    value: dossier?.buyerThesis.isEmpty == false ? "Complete" : "Pending"
+                ),
+            ]
+        }
+
+        let preferred = [
+            ("referring_domains", "Referring Domains"),
+            ("backlinks", "Backlinks"),
+            ("domain_rank", "Domain Rank"),
+            ("page_rank", "Page Rank"),
+            ("anchor_diversity", "Anchor Diversity"),
+            ("spam_score", "Spam Score"),
+            ("archive_history", "Archive History"),
+        ]
+        let resolved = preferred.compactMap(metricItem)
+        if resolved.count >= 4 { return resolved }
+
+        let independent = Set(links.map(\.sourceDomain)).count
+        let live = links.filter { $0.currentlyLive == true }.count
+        return [
+            MetricItem(key: "independent", label: "Independent Sources", value: String(independent)),
+            MetricItem(key: "live", label: "Currently Live", value: String(live)),
+            MetricItem(
+                key: "editorial",
+                label: "Editorial Placement",
+                value: links.allSatisfy { $0.isEditorial == true } ? "Verified" : "Review"
+            ),
+            MetricItem(
+                key: "topic",
+                label: "Topical Context",
+                value: dossier?.status == "complete" ? "Consistent" : "Pending"
+            ),
+        ]
+    }
+
+    private func metricItem(_ descriptor: (String, String)) -> MetricItem? {
+        let (key, label) = descriptor
+        guard let raw = assessment.signals[key] ?? dossier?.evidenceSummary[key],
+              let value = displayValue(raw)
+        else { return nil }
+        return MetricItem(key: key, label: label, value: value)
+    }
+
+    private func displayValue(_ value: JSONValue) -> String? {
+        switch value {
+        case let .string(string):
+            return string
+        case let .number(number):
+            return number.rounded() == number ? String(Int(number)) : number.formatted(.number.precision(.fractionLength(1)))
+        case let .bool(flag):
+            return flag ? "Yes" : "No"
+        case let .array(values):
+            return String(values.count)
+        case let .object(values):
+            return String(values.count)
+        case .null:
+            return nil
+        }
     }
 
     private func scoreLabel(_ score: Double?) -> String {

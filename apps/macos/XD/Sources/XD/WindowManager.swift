@@ -20,7 +20,10 @@ final class WindowManager: NSObject, NSWindowDelegate {
         let controller = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: controller)
         window.title = "XD"
-        window.setContentSize(NSSize(width: 1_440, height: 960))
+        // Option 3's evidence-instrument composition is intentionally taller
+        // than a generic dashboard. Keep this ratio so the three columns and
+        // fixed decision rail retain the same visual balance on either Mac.
+        window.setContentSize(NSSize(width: 1_400, height: 996))
         window.minSize = NSSize(width: 1_080, height: 700)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.titleVisibility = .hidden
@@ -38,4 +41,3 @@ final class WindowManager: NSObject, NSWindowDelegate {
         // Keep the controller alive so reopening is immediate and preserves state.
     }
 }
-

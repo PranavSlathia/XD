@@ -14,7 +14,7 @@ public struct ReviewWindowRoot: View {
 
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 176, ideal: 210, max: 235)
+                .navigationSplitViewColumnWidth(min: 176, ideal: 200, max: 225)
         } content: {
             switch store.selectedSection {
             case .runs:
@@ -159,4 +159,3 @@ private struct CommandPaletteView: View {
         .disabled(!enabled)
     }
 }
-

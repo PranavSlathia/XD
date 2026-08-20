@@ -34,18 +34,17 @@ struct SidebarView: View {
 
             VStack(alignment: .leading, spacing: 9) {
                 Divider().overlay(theme.line)
+                if let generatedAt = store.today?.generatedAt {
+                    Text("\(XDFormat.shortDate.string(from: generatedAt).uppercased())  ·  \(XDFormat.time.string(from: generatedAt))")
+                        .font(theme.mono(11))
+                        .foregroundStyle(theme.secondaryLabel)
+                }
+                Text("Always-on research")
+                    .foregroundStyle(theme.secondaryLabel)
                 StatusLamp(
                     color: store.systemHealthy ? theme.green : theme.amber,
-                    label: "SYSTEM HEALTH"
+                    label: store.connection == .online ? "Private mode" : store.connection.label
                 )
-                Text(store.connection.label.uppercased())
-                    .font(theme.mono(12, weight: .semibold))
-                    .foregroundStyle(store.systemHealthy ? theme.green : theme.amber)
-                if let generatedAt = store.today?.generatedAt {
-                    Text("Updated \(XDFormat.shortDate.string(from: generatedAt)) · \(XDFormat.time.string(from: generatedAt))")
-                        .font(theme.mono(10))
-                        .foregroundStyle(theme.tertiaryLabel)
-                }
             }
             .padding(20)
         }
@@ -62,6 +61,7 @@ struct SidebarView: View {
                 .foregroundStyle(store.selectedSection == section ? theme.amber : theme.secondaryLabel)
                 .frame(width: 20)
             Text(section.title)
+                .font(.system(size: 14))
                 .foregroundStyle(theme.label)
             Spacer(minLength: 6)
             if section == .today, store.unreadCount > 0 {
@@ -80,4 +80,3 @@ struct SidebarView: View {
         )
     }
 }
-

@@ -87,7 +87,14 @@ public enum XDFixtures {
                 modelVersion: "name-screen-v1",
                 configVersion: 1,
                 computedAt: now,
-                signals: ["commercial_fit": .string("strong")],
+                signals: [
+                    "commercial_fit": .string("strong"),
+                    "exact_match": .string("NorthlineLab.com"),
+                    "trademark_check": .string("Clear"),
+                    "search_interest": .string("Consistent"),
+                    "type_in_potential": .string("Strong"),
+                    "name_quality": .string("High"),
+                ],
                 reasons: ["Natural commercial compound", "Easy to pronounce"],
                 missingEvidence: []
             ),
@@ -100,7 +107,16 @@ public enum XDFixtures {
                 modelVersion: "authority-rubric-v1",
                 configVersion: 1,
                 computedAt: now,
-                signals: ["verified_sources": .number(14)],
+                signals: [
+                    "verified_sources": .number(14),
+                    "referring_domains": .number(142),
+                    "backlinks": .number(631),
+                    "domain_rank": .number(32),
+                    "page_rank": .number(29),
+                    "anchor_diversity": .string("Good"),
+                    "spam_score": .string("1%"),
+                    "archive_history": .string("Clean"),
+                ],
                 reasons: ["Independent editorial citations", "Topically consistent"],
                 missingEvidence: []
             ),
@@ -202,4 +218,3 @@ public enum XDFixtures {
         )
     }
 }
-
