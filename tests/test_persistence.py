@@ -212,3 +212,61 @@ async def test_persist_is_idempotent(patched_engine: None) -> None:
         assert n_sources == 1
         assert n_cands == 1
         assert n_ments == 1
+
+
+@pytest.mark.integration
+async def test_inventory_refresh_preserves_authoritative_rdap_state(
+    patched_engine: None,
+) -> None:
+    """A marketplace refresh cannot downgrade authoritative lifecycle evidence."""
+    import datetime as dt
+
+    from sqlalchemy import select
+
+    from dh.db.engine import session_scope
+    from dh.db.models import Candidate
+    from dh.sources.marketplace.dropcatch import DropCatchListing
+    from dh.sources.openpagerank.top_domains import TopDomainRecord
+    from dh.workers.inventory import _persist_matches
+
+    domain = "authoritative-state-preserved.example"
+    async with session_scope() as session:
+        session.add(
+            Candidate(
+                domain=domain,
+                current_status="registered",
+                availability_confidence="authoritative",
+            )
+        )
+
+    observed_at = dt.datetime.now(dt.UTC)
+    record = TopDomainRecord(
+        domain=domain,
+        rank=100_000,
+        open_pagerank=3.5,
+        referring_domains=100,
+    )
+    listing = DropCatchListing(
+        domain=domain,
+        tld="example",
+        record_type="Pending Delete",
+        drop_date=observed_at.date() + dt.timedelta(days=1),
+    )
+    async with session_scope() as session:
+        await _persist_matches(
+            session,
+            records=[record],
+            feed_by_domain={domain: listing},
+            details={},
+            market_by_domain={},
+            authority_cohort_sizes={domain: 1},
+            observed_at=observed_at,
+        )
+
+    async with session_scope() as session:
+        candidate = (
+            await session.execute(select(Candidate).where(Candidate.domain == domain))
+        ).scalar_one()
+
+    assert candidate.current_status == "registered"
+    assert candidate.availability_confidence == "authoritative"

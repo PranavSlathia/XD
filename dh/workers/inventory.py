@@ -238,8 +238,12 @@ async def _persist_matches(
             session.add(candidate)
             candidates[record.domain] = candidate
         candidate.last_observed = observed_at
-        candidate.current_status = "pending_delete"
-        candidate.availability_confidence = "probable"
+        # The marketplace feed is acquisition evidence, but RDAP is the
+        # authoritative lifecycle source. A later inventory refresh must never
+        # downgrade an existing RDAP confirmation back to "probable".
+        if candidate.availability_confidence != "authoritative":
+            candidate.current_status = "pending_delete"
+            candidate.availability_confidence = "probable"
         candidate.open_pagerank = record.open_pagerank
         candidate.referring_domains = record.referring_domains
         candidate.authority_rank = record.rank
