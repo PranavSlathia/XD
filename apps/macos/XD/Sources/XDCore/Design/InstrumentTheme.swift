@@ -61,9 +61,9 @@ public struct InstrumentButtonStyle: ButtonStyle {
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(foreground)
-            .frame(maxWidth: .infinity, minHeight: 42)
+            .frame(maxWidth: .infinity, minHeight: 46)
             .padding(.horizontal, 14)
             .background(background.opacity(configuration.isPressed ? 0.72 : 1))
             .overlay {

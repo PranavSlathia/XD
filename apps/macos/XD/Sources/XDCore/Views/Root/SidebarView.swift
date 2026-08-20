@@ -10,10 +10,10 @@ struct SidebarView: View {
 
         VStack(spacing: 0) {
             HStack {
+                Spacer()
                 Text("XD")
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(theme.label)
-                Spacer()
             }
             .padding(.horizontal, 20)
             .frame(height: 66)
@@ -61,7 +61,7 @@ struct SidebarView: View {
                 .foregroundStyle(store.selectedSection == section ? theme.amber : theme.secondaryLabel)
                 .frame(width: 20)
             Text(section.title)
-                .font(.system(size: 14))
+                .font(.system(size: 15))
                 .foregroundStyle(theme.label)
             Spacer(minLength: 6)
             if section == .today, store.unreadCount > 0 {

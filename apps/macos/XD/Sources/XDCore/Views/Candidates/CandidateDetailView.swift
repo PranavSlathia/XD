@@ -57,7 +57,7 @@ struct CandidateDetailView: View {
     }
 
     private func header(_ detail: CandidateDetail) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(detail.domain)
                     .font(.system(size: 32, weight: .semibold))
@@ -99,7 +99,8 @@ struct CandidateDetailView: View {
             }
         }
         .padding(.horizontal, 36)
-        .padding(.vertical, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 33)
     }
 
     private func lanePanels(_ detail: CandidateDetail) -> some View {
@@ -183,15 +184,15 @@ struct CandidateDetailView: View {
                 .foregroundStyle(theme.secondaryLabel)
                 .frame(width: 22)
             Text(title)
-                .font(.system(size: 15))
+                .font(.system(size: 17))
                 .foregroundStyle(theme.secondaryLabel)
             Spacer()
             Text(value)
-                .font(theme.mono(13, weight: .medium))
+                .font(theme.mono(15, weight: .medium))
                 .foregroundStyle(color)
                 .lineLimit(1)
         }
-        .frame(minHeight: 58)
+        .frame(minHeight: 54)
         .contentShape(Rectangle())
     }
 
@@ -269,7 +270,7 @@ private struct LaneAssessmentPanel: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text("\(assessment.lane.title.uppercased()) · \(displayState)")
-                        .font(theme.mono(14, weight: .semibold))
+                        .font(theme.mono(15, weight: .semibold))
                         .foregroundStyle(theme.laneColor(assessment.lane))
                     Spacer()
                 }
@@ -282,22 +283,22 @@ private struct LaneAssessmentPanel: View {
 
                 Spacer(minLength: 0)
                 Divider().overlay(theme.line)
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Text("Evidence quality:")
                             .foregroundStyle(theme.tertiaryLabel)
                         Text(evidenceQuality)
                             .foregroundStyle(evidenceQuality == "High" ? theme.secondaryLabel : theme.amber)
                     }
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     Text(dossier?.thesis ?? assessment.reasons.first ?? "Evidence collection in progress.")
-                        .font(.system(size: 12))
+                        .font(.system(size: 10))
                         .foregroundStyle(theme.secondaryLabel)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .frame(minHeight: 82, alignment: .topLeading)
+                .padding(.vertical, 6)
+                .frame(minHeight: 45, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, minHeight: 382, alignment: .top)
         }
@@ -307,16 +308,16 @@ private struct LaneAssessmentPanel: View {
     private func metric(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 14))
+                .font(.system(size: 16))
                 .foregroundStyle(theme.secondaryLabel)
             Spacer()
             Text(value)
-                .font(theme.mono(13, weight: .medium))
+                .font(theme.mono(15, weight: .medium))
                 .foregroundStyle(theme.green)
                 .lineLimit(1)
         }
         .padding(.horizontal, 16)
-        .frame(height: 35)
+        .frame(height: 41)
     }
 
     private var displayState: String {

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum XDFixtures {
-    private static let now = Date(timeIntervalSince1970: 1_776_411_240)
+    private static let now = Date(timeIntervalSince1970: 1_787_283_840)
 
     public static let candidates: [CandidateSummary] = [
         CandidateSummary(
@@ -13,11 +13,11 @@ public enum XDFixtures {
             nameScore: 88,
             authorityScore: 91,
             reviewState: .research,
-            lifecycleState: "available",
+            lifecycleState: "expired",
             currentStatus: "available",
             availabilityConfidence: "registrar",
-            promotedAt: now.addingTimeInterval(-7_200),
-            lastObserved: now,
+            promotedAt: now.addingTimeInterval(-360),
+            lastObserved: now.addingTimeInterval(-360),
             dossierUpdatedAt: now.addingTimeInterval(-360)
         ),
         CandidateSummary(
@@ -29,12 +29,12 @@ public enum XDFixtures {
             nameScore: 84,
             authorityScore: 86,
             reviewState: .research,
-            lifecycleState: "available",
+            lifecycleState: "expired",
             currentStatus: "available",
             availabilityConfidence: "registrar",
-            promotedAt: now.addingTimeInterval(-10_000),
-            lastObserved: now.addingTimeInterval(-1_200),
-            dossierUpdatedAt: now.addingTimeInterval(-1_200)
+            promotedAt: now.addingTimeInterval(-1_620),
+            lastObserved: now.addingTimeInterval(-1_620),
+            dossierUpdatedAt: now.addingTimeInterval(-1_620)
         ),
         CandidateSummary(
             id: 103,
@@ -45,12 +45,12 @@ public enum XDFixtures {
             nameScore: 79,
             authorityScore: 82,
             reviewState: .research,
-            lifecycleState: "available",
+            lifecycleState: "expired",
             currentStatus: "available",
             availabilityConfidence: "registrar",
-            promotedAt: now.addingTimeInterval(-15_000),
-            lastObserved: now.addingTimeInterval(-3_000),
-            dossierUpdatedAt: now.addingTimeInterval(-3_000)
+            promotedAt: now.addingTimeInterval(-3_300),
+            lastObserved: now.addingTimeInterval(-3_300),
+            dossierUpdatedAt: now.addingTimeInterval(-3_300)
         ),
     ]
 
@@ -71,11 +71,11 @@ public enum XDFixtures {
         nameScore: candidates[0].nameScore,
         authorityScore: candidates[0].authorityScore,
         reviewState: .research,
-        lifecycleState: "available",
+        lifecycleState: "expired",
         currentStatus: "available",
         availabilityConfidence: "registrar",
         promotedAt: candidates[0].promotedAt,
-        lastObserved: now,
+        lastObserved: now.addingTimeInterval(-360),
         dossierUpdatedAt: now,
         assessments: [
             LaneAssessment(

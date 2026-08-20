@@ -99,7 +99,7 @@ private struct CandidateRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
                 Text(candidate.domain)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(theme.label)
                     .lineLimit(1)
                 HStack {
