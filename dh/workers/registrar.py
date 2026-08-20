@@ -8,12 +8,12 @@ from __future__ import annotations
 import asyncio
 import signal
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dh.config import settings
 from dh.db.engine import session_scope
-from dh.db.models import Candidate, RegistrarQuote
+from dh.db.models import Candidate, CandidateEvent, RegistrarQuote
 from dh.engine.assessments import assess_candidate
 from dh.logging import configure_logging, log
 from dh.sources.registrar.porkbun import RegistrarQuoteResult, quote_domain
@@ -45,6 +45,14 @@ async def _claim_batch(session: AsyncSession, *, batch_size: int) -> list[tuple[
 
 
 async def _persist(session: AsyncSession, candidate_id: int, quote: RegistrarQuoteResult) -> None:
+    previous = (
+        await session.execute(
+            select(RegistrarQuote)
+            .where(RegistrarQuote.candidate_id == candidate_id)
+            .order_by(RegistrarQuote.observed_at.desc(), RegistrarQuote.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     session.add(
         RegistrarQuote(
             candidate_id=candidate_id,
@@ -64,6 +72,29 @@ async def _persist(session: AsyncSession, candidate_id: int, quote: RegistrarQuo
     cand = await session.get(Candidate, candidate_id)
     if cand is not None:
         cand.score_version = None
+        changed = previous is None or (
+            previous.availability_status,
+            previous.price_class,
+            previous.quote_price_micros,
+        ) != (
+            quote.availability_status,
+            quote.price_class,
+            quote.quote_price_micros,
+        )
+        if changed and cand.promoted_at is not None:
+            session.add(
+                CandidateEvent(
+                    candidate_id=candidate_id,
+                    event_type="availability.changed",
+                    payload={
+                        "domain": cand.domain,
+                        "registrar": quote.registrar,
+                        "availability_status": quote.availability_status,
+                        "price_class": quote.price_class,
+                        "quote_price_micros": quote.quote_price_micros,
+                    },
+                )
+            )
         await session.flush()
         await assess_candidate(session, cand)
 

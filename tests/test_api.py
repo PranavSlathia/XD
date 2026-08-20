@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime as dt
+
 
 def test_app_imports() -> None:
     from dh.api import app
@@ -40,6 +42,39 @@ def test_v1_has_no_purchase_or_arbitrary_command_route() -> None:
     paths = " ".join(app.openapi()["paths"]).lower()
     for forbidden in ("purchase", "buy", "bid", "backorder", "shell", "command", "docker"):
         assert forbidden not in paths
+
+
+def test_hybrid_requires_both_lanes_to_independently_qualify() -> None:
+    from dh.api.v1 import _summary
+    from dh.db.models import Candidate, LaneAssessment
+
+    candidate = Candidate(
+        id=1,
+        domain="plainmarket.org",
+        review_state="research",
+        lifecycle_state="available",
+        last_observed=dt.datetime.now(dt.UTC),
+    )
+    name = LaneAssessment(
+        candidate_id=1,
+        lane="name",
+        state="qualified",
+        screen_passed=True,
+        model_version="name-test",
+        config_version=1,
+    )
+    authority = LaneAssessment(
+        candidate_id=1,
+        lane="authority",
+        state="research",
+        screen_passed=True,
+        model_version="authority-test",
+        config_version=1,
+    )
+
+    assert _summary(candidate, (name, authority)).hybrid is False
+    authority.state = "qualified"
+    assert _summary(candidate, (name, authority)).hybrid is True
 
 
 def test_decision_contract_rejects_unknown_actions() -> None:

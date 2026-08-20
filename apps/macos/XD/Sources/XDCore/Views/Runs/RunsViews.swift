@@ -76,8 +76,11 @@ struct OperationsDetailView: View {
                                 Text(kind.title).tag(kind)
                             }
                         }
-                        if selectedKind.needsCandidate || selectedKind == .recomputeAssessments {
-                            TextField("Candidate ID", text: $candidateID)
+                        if selectedKind.acceptsCandidate {
+                            TextField(
+                                selectedKind.needsCandidate ? "Candidate ID" : "Candidate ID (optional)",
+                                text: $candidateID
+                            )
                                 .textFieldStyle(.roundedBorder)
                         }
                         if selectedKind.needsSeed {
@@ -162,4 +165,3 @@ struct OperationsDetailView: View {
             .foregroundStyle(theme.secondaryLabel)
     }
 }
-

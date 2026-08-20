@@ -27,6 +27,10 @@ public enum JobKind: String, Codable, CaseIterable, Identifiable, Sendable {
         self == .backlinkValidate || self == .generateDossier
     }
 
+    public var acceptsCandidate: Bool {
+        needsCandidate || self == .waybackRefresh || self == .recomputeAssessments
+    }
+
     public var needsSeed: Bool { self == .contentCrawl }
 }
 
@@ -153,4 +157,3 @@ public struct ConfigDraft: Equatable, Sendable {
         return result
     }
 }
-

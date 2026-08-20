@@ -72,6 +72,7 @@ async def generate_dossiers(session: AsyncSession, candidate_id: int) -> int:
     )
     dossiers = {row.lane: row for row in existing}
     generated = 0
+    completed_lanes: set[Lane] = set()
     for assessment in assessments:
         lane = Lane(assessment.lane)
         dossier = dossiers.get(lane.value)
@@ -83,6 +84,7 @@ async def generate_dossiers(session: AsyncSession, candidate_id: int) -> int:
                 status="research",
             )
             session.add(dossier)
+        previously_complete = dossier.status == "complete"
         dossier.generated_at = dt.datetime.now(dt.UTC)
         dossier.status = "complete" if lane in readiness.ready_lanes else "research"
         dossier.thesis = (
@@ -101,14 +103,21 @@ async def generate_dossiers(session: AsyncSession, candidate_id: int) -> int:
             ),
             "signals": assessment.signals or {},
         }
+        assessment.state = "qualified" if lane in readiness.ready_lanes else "research"
+        if dossier.status == "complete" and not previously_complete:
+            completed_lanes.add(lane)
         generated += 1
     candidate.dossier_updated_at = dt.datetime.now(dt.UTC)
     if generated:
         session.add(
             CandidateEvent(
                 candidate_id=candidate_id,
-                event_type="dossier.completed",
-                payload={"domain": candidate.domain, "lanes": sorted(lane.value for lane in screened_lanes)},
+                event_type=("dossier.completed" if completed_lanes else "dossier.updated"),
+                payload={
+                    "domain": candidate.domain,
+                    "lanes": sorted(lane.value for lane in screened_lanes),
+                    "completed_lanes": sorted(lane.value for lane in completed_lanes),
+                },
                 config_version=config_row.version,
             )
         )

@@ -133,6 +133,26 @@ def _unknown_quote(domain: str, reason: str) -> RegistrarQuoteResult:
     )
 
 
+async def _request_quote(
+    client: httpx.AsyncClient,
+    domain: str,
+    *,
+    headers: dict[str, str],
+) -> dict[str, object]:
+    # Porkbun's v3 checkDomain contract is a POST. Header authentication lets
+    # the required JSON auth object remain empty while keeping credentials out
+    # of request bodies and logs.
+    response = await client.post(
+        f"{_API_ROOT}/domain/checkDomain/{domain}",
+        headers=headers,
+        json={},
+    )
+    if response.status_code == 429:
+        log.warning("porkbun.rate_limited", domain=domain)
+    response.raise_for_status()
+    return _as_mapping(cast(object, response.json()))
+
+
 @retry(
     retry=retry_if_exception_type(httpx.HTTPError),
     stop=stop_after_attempt(2),
@@ -159,12 +179,5 @@ async def quote_domain(domain: str) -> RegistrarQuoteResult:
     }
     async with _LIMITER:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{_API_ROOT}/domain/checkDomain/{domain}", headers=headers
-            )
-            if resp.status_code == 429:
-                log.warning("porkbun.rate_limited", domain=domain)
-            resp.raise_for_status()
-            parsed: object = resp.json()
-    data = _as_mapping(parsed)
+            data = await _request_quote(client, domain, headers=headers)
     return parse_quote_response(domain, data)

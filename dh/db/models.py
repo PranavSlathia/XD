@@ -150,6 +150,12 @@ class Candidate(Base):
             postgresql_where=text("NOT hard_filtered"),
         ),
         Index("ix_candidates_current_status", "current_status"),
+        Index(
+            "ix_candidates_xd_review_dossier",
+            "review_state",
+            "dossier_updated_at",
+            postgresql_where=text("promoted_at IS NOT NULL"),
+        ),
     )
 
 
@@ -492,6 +498,13 @@ class LaneAssessment(Base):
     __table_args__ = (
         UniqueConstraint("candidate_id", "lane", "config_version"),
         Index("ix_lane_assessments_lane_state", "lane", "state", "computed_at"),
+        Index(
+            "ix_lane_assessments_config_lane_state_candidate",
+            "config_version",
+            "lane",
+            "state",
+            "candidate_id",
+        ),
     )
 
 
@@ -591,6 +604,7 @@ class SourcePage(Base):
     http_status: Mapped[int | None] = mapped_column(Integer)
     content_type: Mapped[str | None] = mapped_column(String(128))
     etag: Mapped[str | None] = mapped_column(Text)
+    outgoing_urls: Mapped[list[str] | None] = mapped_column(JSONB)
     content_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32))
     first_seen: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

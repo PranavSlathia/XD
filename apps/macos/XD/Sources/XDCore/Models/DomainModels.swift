@@ -187,7 +187,34 @@ public struct CandidateDetail: Codable, Identifiable, Equatable, Sendable {
     public var failedGates: [GateResult] { gates.filter { $0.state == .fail } }
     public var pendingGates: [GateResult] { gates.filter { $0.state == .pending } }
     public var canBecomeReady: Bool {
-        !lanes.isEmpty && failedGates.isEmpty && pendingGates.isEmpty
+        let sharedRequired = [
+            "availability_authoritative",
+            "standard_registration_price",
+            "rights_clear",
+            "reputation_clean",
+            "history_clean",
+            "buyer_thesis",
+        ]
+        let laneRequired: [AssetLane: [String]] = [
+            .name: ["name_quality", "domain_specific_comps"],
+            .authority: ["verified_referring_pages", "authority_rubric"],
+        ]
+        let states = Dictionary(
+            uniqueKeysWithValues: gates.map { ("\($0.lane):\($0.gateKey)", $0.state) }
+        )
+        guard !gates.contains(where: { $0.fatal && $0.state == .fail }),
+              sharedRequired.allSatisfy({ states["shared:\($0)"] == .pass })
+        else { return false }
+
+        return assessments.contains { assessment in
+            guard assessment.screenPassed,
+                  assessment.state == "qualified",
+                  dossiers.contains(where: { $0.lane == assessment.lane && $0.status == "complete" })
+            else { return false }
+            return (laneRequired[assessment.lane] ?? []).allSatisfy {
+                states["\(assessment.lane.rawValue):\($0)"] == .pass
+            }
+        }
     }
 }
 

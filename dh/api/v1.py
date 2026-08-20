@@ -9,6 +9,7 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, select, text, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,7 +62,7 @@ from dh.db.models import (
 )
 from dh.engine.configuration import EngineConfig, config_diff, get_active_config
 from dh.jobs import SAFE_JOB_KINDS, new_job_id
-from dh.lanes.gates import GateEvidence, evaluate_readiness
+from dh.lanes.gates import GateEvidence, evaluate_readiness, review_transition_allowed
 from dh.lanes.types import GateState, Lane
 from dh.security.device_auth import DeviceIdentity, complete_pairing, require_device
 
@@ -119,7 +120,15 @@ def _summary(candidate: Candidate, assessments: Sequence[LaneAssessment]) -> Can
         id=candidate.id,
         domain=candidate.domain,
         lanes=lanes,
-        hybrid=len(lanes) == 2,
+        # Screening puts a domain into one or both Research lanes.  "Hybrid"
+        # is reserved for the stronger claim that both lanes independently
+        # completed qualification; merely entering two screens is not enough.
+        hybrid=(
+            name is not None
+            and authority is not None
+            and name.state == "qualified"
+            and authority.state == "qualified"
+        ),
         name_subtype=name.name_subtype if name else None,
         name_score=float(name.lane_score) if name and name.lane_score is not None else None,
         authority_score=(
@@ -173,7 +182,10 @@ async def today(
         await session.execute(
             select(func.count(CandidateEvent.id))
             .outerjoin(EventReadReceipt, EventReadReceipt.event_id == CandidateEvent.id)
-            .where(EventReadReceipt.event_id.is_(None))
+            .where(
+                CandidateEvent.candidate_id.is_not(None),
+                EventReadReceipt.event_id.is_(None),
+            )
         )
     ).scalar_one()
     stale_before = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=90)
@@ -234,7 +246,7 @@ async def candidates(
                     LaneAssessment.candidate_id == Candidate.id,
                     LaneAssessment.config_version == config_row.version,
                     LaneAssessment.lane == item,
-                    LaneAssessment.screen_passed.is_(True),
+                    LaneAssessment.state == "qualified",
                 )
                 .exists()
             )
@@ -406,6 +418,11 @@ async def review_candidate(
     candidate = await session.get(Candidate, candidate_id)
     if candidate is None or candidate.promoted_at is None:
         raise HTTPException(status_code=404, detail="candidate not found")
+    if not review_transition_allowed(candidate.review_state, body.decision):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Rejected candidates must be explicitly reopened into Research first",
+        )
     config_row, _config = await get_active_config(session)
     assessments = (
         (
@@ -432,6 +449,18 @@ async def review_candidate(
         .scalars()
         .all()
     )
+    dossiers = (
+        (
+            await session.execute(
+                select(CandidateDossier).where(
+                    CandidateDossier.candidate_id == candidate_id,
+                    CandidateDossier.config_version == config_row.version,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     readiness = evaluate_readiness(
         {Lane(row.lane) for row in assessments},
         [
@@ -439,14 +468,28 @@ async def review_candidate(
             for row in gates
         ],
     )
-    if body.decision == "ready" and not readiness.ready:
+    qualified_lanes = {Lane(row.lane) for row in assessments if row.state == "qualified"}
+    complete_dossiers = {
+        Lane(row.lane) for row in dossiers if row.status == "complete"
+    }
+    eligible_lanes = set(readiness.ready_lanes) & qualified_lanes & complete_dossiers
+    if body.decision == "ready" and not eligible_lanes:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "message": "candidate cannot be Ready until a lane and every shared gate pass",
+                "message": (
+                    "candidate cannot be Ready until at least one lane independently "
+                    "qualifies with a complete dossier and every required gate passed"
+                ),
                 "pending": readiness.pending,
                 "failed": readiness.failed,
                 "fatal": readiness.fatal_failures,
+                "unqualified_lanes": sorted(
+                    lane.value for lane in set(readiness.ready_lanes) - qualified_lanes
+                ),
+                "incomplete_dossiers": sorted(
+                    lane.value for lane in set(readiness.ready_lanes) - complete_dossiers
+                ),
             },
         )
     if body.decision == "reject" and not body.reason:
@@ -550,9 +593,11 @@ async def mark_event_read(
     event = await session.get(CandidateEvent, event_id)
     if event is None:
         raise HTTPException(status_code=404, detail="event not found")
-    receipt = await session.get(EventReadReceipt, event_id)
-    if receipt is None:
-        session.add(EventReadReceipt(event_id=event_id, device_id=device.id))
+    await session.execute(
+        insert(EventReadReceipt)
+        .values(event_id=event_id, device_id=device.id)
+        .on_conflict_do_nothing(index_elements=[EventReadReceipt.event_id])
+    )
     return EventItem(
         id=event.id,
         candidate_id=event.candidate_id,
@@ -602,6 +647,14 @@ async def create_job(
         config_version=config_row.version,
     )
     session.add(job)
+    session.add(
+        CandidateEvent(
+            event_type="job.queued",
+            payload={"id": job.id, "kind": job.kind, "state": job.state},
+            config_version=config_row.version,
+            actor_device_id=device.id,
+        )
+    )
     try:
         await session.flush()
     except IntegrityError as exc:
@@ -746,6 +799,14 @@ async def create_config_version(
         is_active=False,
     )
     session.add(row)
+    session.add(
+        CandidateEvent(
+            event_type="config.created",
+            payload={"version": next_version, "parent": parent.version},
+            config_version=next_version,
+            actor_device_id=device.id,
+        )
+    )
     await session.flush()
     return _config_item(row, parent=parent.config_json)
 
@@ -791,6 +852,13 @@ async def pairing_complete(
         )
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    session.add(
+        CandidateEvent(
+            event_type="device.paired",
+            payload={"device_id": device.id, "device_name": device.device_name},
+            actor_device_id=device.id,
+        )
+    )
     return PairingResult(device_id=device.id, device_name=device.device_name, token=token)
 
 
@@ -819,6 +887,13 @@ async def revoke_device(
     if row.id == device.id:
         raise HTTPException(status_code=409, detail="pair another device before revoking this one")
     row.revoked_at = dt.datetime.now(dt.UTC)
+    session.add(
+        CandidateEvent(
+            event_type="device.revoked",
+            payload={"device_id": row.id, "device_name": row.device_name},
+            actor_device_id=device.id,
+        )
+    )
 
 
 @router.get("/portfolio", response_model=list[PortfolioOutcomeItem])

@@ -53,6 +53,7 @@ public struct InstrumentButtonStyle: ButtonStyle {
     public enum Tone { case neutral, primary, destructive }
 
     @Environment(InstrumentTheme.self) private var theme
+    @Environment(\.isEnabled) private var isEnabled
     private let tone: Tone
 
     public init(tone: Tone = .neutral) {
@@ -62,13 +63,17 @@ public struct InstrumentButtonStyle: ButtonStyle {
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(foreground)
-            .frame(maxWidth: .infinity, minHeight: 46)
+            .foregroundStyle(foreground.opacity(isEnabled ? 1 : 0.42))
+            .frame(maxWidth: .infinity, minHeight: 50)
             .padding(.horizontal, 14)
-            .background(background.opacity(configuration.isPressed ? 0.72 : 1))
+            .background(
+                background.opacity(
+                    isEnabled ? (configuration.isPressed ? 0.72 : 1) : 0.28
+                )
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(border, lineWidth: 1)
+                    .stroke(border.opacity(isEnabled ? 1 : 0.35), lineWidth: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 4))
             .contentShape(Rectangle())

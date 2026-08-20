@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import datetime as dt
 
+import httpx
 import pytest
 
 from dh.sources.registrar.core import TLD_ADAPTERS, adapter_for_domain
-from dh.sources.registrar.porkbun import parse_quote_response
+from dh.sources.registrar.porkbun import _request_quote, parse_quote_response
 
 
 def test_core_six_have_explicit_lifecycle_adapters() -> None:
@@ -124,3 +125,34 @@ def test_missing_premium_or_failed_provider_response_stays_unknown() -> None:
     assert failed.availability_status == "unknown"
     assert failed.price_class == "unknown"
 
+
+@pytest.mark.asyncio
+async def test_porkbun_availability_uses_read_only_post_contract() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["body"] = request.content
+        seen["api_key"] = request.headers.get("X-API-Key")
+        return httpx.Response(
+            200,
+            json={
+                "status": "SUCCESS",
+                "response": {
+                    "avail": "yes",
+                    "type": "registration",
+                    "price": "11.08",
+                    "premium": "no",
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        response = await _request_quote(
+            client,
+            "brightmarket.com",
+            headers={"X-API-Key": "public", "X-Secret-API-Key": "secret"},
+        )
+
+    assert seen == {"method": "POST", "body": b"{}", "api_key": "public"}
+    assert response["status"] == "SUCCESS"

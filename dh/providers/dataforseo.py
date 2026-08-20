@@ -38,10 +38,16 @@ def _optional_string(value: object) -> str | None:
 class DataForSEOBacklinkProvider:
     name = "dataforseo"
 
-    def __init__(self, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.AsyncClient | None = None,
+        candidate_id: int | None = None,
+    ) -> None:
         if not settings.dataforseo_login or not settings.dataforseo_password:
             raise DataForSEOError("DataForSEO credentials are not configured")
         self._owned_client = client is None
+        self._candidate_id = candidate_id
         self._client = client or httpx.AsyncClient(
             base_url=BASE_URL,
             auth=(settings.dataforseo_login, settings.dataforseo_password),
@@ -71,7 +77,7 @@ class DataForSEOBacklinkProvider:
             request_id=request_id,
             reserve_micros=config.paid_enrichment.operation_reserve_micros,
             monthly_cap_micros=config.paid_enrichment.monthly_budget_micros,
-            candidate_id=candidate_id,
+            candidate_id=candidate_id if candidate_id is not None else self._candidate_id,
         )
         response = await self._client.post(path, json=[payload])
         response.raise_for_status()

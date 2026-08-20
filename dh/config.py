@@ -128,6 +128,7 @@ class Settings(BaseSettings):
 
     operator_job_interval_seconds: int = 5
     operator_worker_name: str = "dh-worker-operator"
+    operator_max_load_15m: float = Field(default=2.8, ge=0.5, le=32.0)
     event_poll_interval_seconds: float = 2.0
     event_keepalive_seconds: float = 15.0
 

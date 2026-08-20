@@ -226,7 +226,7 @@ struct CandidateDetailView: View {
                 .disabled(!detail.canBecomeReady || !store.canMutate || store.isMutating)
         }
         .padding(.horizontal, 36)
-        .padding(.vertical, 18)
+        .padding(.vertical, 20)
         .background(theme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 1) }
         .disabled(!store.canMutate || store.isMutating)
@@ -291,7 +291,7 @@ private struct LaneAssessmentPanel: View {
                             .foregroundStyle(evidenceQuality == "High" ? theme.secondaryLabel : theme.amber)
                     }
                     .font(.system(size: 12))
-                    Text(dossier?.thesis ?? assessment.reasons.first ?? "Evidence collection in progress.")
+                    Text(conciseThesis)
                         .font(.system(size: 10))
                         .foregroundStyle(theme.secondaryLabel)
                         .lineLimit(1)
@@ -330,6 +330,13 @@ private struct LaneAssessmentPanel: View {
 
     private var evidenceQuality: String {
         assessment.missingEvidence.isEmpty && dossier?.status == "complete" ? "High" : "Pending"
+    }
+
+    private var conciseThesis: String {
+        if !assessment.reasons.isEmpty {
+            return assessment.reasons.prefix(2).joined(separator: " · ")
+        }
+        return dossier?.thesis ?? "Evidence collection in progress."
     }
 
     private var metrics: [MetricItem] {

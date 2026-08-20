@@ -38,11 +38,12 @@ class AuthorityScreenResult:
     reasons: tuple[str, ...]
     missing_evidence: tuple[str, ...]
     verified_independent_domains: int
+    relevant_independent_domains: int
     model_version: str = MODEL_VERSION
 
 
 def screen_authority(value: AuthorityScreenInput) -> AuthorityScreenResult:
-    valid_links = tuple(
+    verified_links = tuple(
         link
         for link in value.observed_links
         if link.live
@@ -51,7 +52,9 @@ def screen_authority(value: AuthorityScreenInput) -> AuthorityScreenResult:
         and link.independent
         and not link.technical
     )
-    independent_domains = len({link.source_domain.lower() for link in valid_links})
+    relevant_links = tuple(link for link in verified_links if link.relevant)
+    independent_domains = len({link.source_domain.lower() for link in verified_links})
+    relevant_domains = len({link.source_domain.lower() for link in relevant_links})
     provider_prefilter = (value.referring_domains or 0) >= value.minimum_referring_domains
     direct_prefilter = independent_domains > 0
     passed = provider_prefilter or direct_prefilter
@@ -78,6 +81,8 @@ def screen_authority(value: AuthorityScreenInput) -> AuthorityScreenResult:
         missing.append("direct referring-page validation")
     if not value.observed_links:
         missing.append("anchor, context, rel, and topical evidence")
+    elif relevant_domains == 0:
+        missing.append("topical relevance validation")
     missing.extend(("historical topic consistency", "authority rubric calibration"))
     return AuthorityScreenResult(
         domain=value.domain,
@@ -86,4 +91,5 @@ def screen_authority(value: AuthorityScreenInput) -> AuthorityScreenResult:
         reasons=tuple(reasons),
         missing_evidence=tuple(dict.fromkeys(missing)),
         verified_independent_domains=independent_domains,
+        relevant_independent_domains=relevant_domains,
     )

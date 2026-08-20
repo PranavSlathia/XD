@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Sequence
 
+import tldextract
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,15 @@ from dh.lanes.authority import AuthorityLink, AuthorityScreenInput, screen_autho
 from dh.lanes.gates import LANE_GATES, SHARED_GATES
 from dh.lanes.name import screen_name
 from dh.lanes.types import AssessmentState, GateState, Lane
+
+_extract = tldextract.TLDExtract(suffix_list_urls=())
+
+
+def _registrable_domain(value: str) -> str:
+    parsed = _extract(value)
+    if parsed.domain and parsed.suffix:
+        return f"{parsed.domain}.{parsed.suffix}".lower()
+    return value.lower().rstrip(".")
 
 
 async def _upsert_assessment(
@@ -233,7 +243,7 @@ async def _authority_links(session: AsyncSession, candidate_id: int) -> tuple[Au
     ).all()
     return tuple(
         AuthorityLink(
-            source_domain=page.host,
+            source_domain=_registrable_domain(page.host),
             source_url=page.url,
             anchor_text=observation.anchor_text,
             context_text=observation.context_text,
@@ -241,7 +251,10 @@ async def _authority_links(session: AsyncSession, candidate_id: int) -> tuple[Au
             editorial=bool(observation.is_editorial),
             followable="nofollow" not in (observation.rel_flags or []),
             relevant=bool(page.topic),
-            independent=page.host != observation.target_domain,
+            independent=(
+                _registrable_domain(page.host)
+                != _registrable_domain(observation.target_domain)
+            ),
             technical=observation.semantic_location in {"head", "script", "canonical"},
         )
         for observation, page in rows
@@ -327,6 +340,7 @@ async def assess_candidate(
         signals={
             "provider_referring_domains": candidate.referring_domains,
             "verified_independent_domains": authority_result.verified_independent_domains,
+            "relevant_independent_domains": authority_result.relevant_independent_domains,
         },
         reasons=authority_result.reasons,
         missing_evidence=authority_result.missing_evidence,
@@ -353,7 +367,10 @@ async def assess_candidate(
             )
         # The rubric remains pending until a labelled evaluation explicitly
         # enables it in a versioned configuration.
-        if config.authority.ready_thresholds_enabled:
+        if (
+            config.authority.ready_thresholds_enabled
+            and authority_result.relevant_independent_domains > 0
+        ):
             await _set_gate(
                 session,
                 candidate_id=candidate.id,
@@ -361,7 +378,7 @@ async def assess_candidate(
                 lane=Lane.AUTHORITY.value,
                 key="authority_rubric",
                 state=GateState.PASSED,
-                details="versioned labelled authority rubric enabled",
+                details="versioned labelled authority rubric passed with topical evidence",
             )
 
     if promoted_lanes:

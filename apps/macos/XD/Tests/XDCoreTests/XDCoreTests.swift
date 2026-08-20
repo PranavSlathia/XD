@@ -26,6 +26,20 @@ final class XDCoreTests: XCTestCase {
         XCTAssertEqual(pending.pendingGates.count, 1)
     }
 
+    func testMissingGateCannotSilentlyEnableReady() throws {
+        let encoded = try APICodec.encoder().encode(XDFixtures.detail)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        var gates = try XCTUnwrap(object["gates"] as? [[String: Any]])
+        gates.removeAll { $0["gate_key"] as? String == "domain_specific_comps" }
+        object["gates"] = gates
+        let changed = try JSONSerialization.data(withJSONObject: object)
+        let missing = try APICodec.decoder().decode(CandidateDetail.self, from: changed)
+
+        XCTAssertFalse(missing.canBecomeReady)
+    }
+
     func testConfigurationDraftPreservesUneditedSections() {
         let version = ConfigVersion.preview()
         var draft = ConfigDraft(version: version)
@@ -79,4 +93,3 @@ final class XDCoreTests: XCTestCase {
         XCTAssertFalse(value.hybrid)
     }
 }
-

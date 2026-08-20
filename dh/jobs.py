@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import os
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from dh.config import settings
 from dh.db.engine import session_scope
 from dh.db.models import (
     Candidate,
+    CandidateEvent,
     LinkObservation,
     OperatorJob,
     SourcePage,
@@ -24,9 +26,11 @@ from dh.engine.dossiers import generate_dossiers
 from dh.providers.budget import ProviderBudgetExhaustedError
 from dh.providers.dataforseo import DataForSEOBacklinkProvider, DataForSEOError
 from dh.sources.content.crawler import run_seed
+from dh.sources.content.validator import validate_candidate_links
 from dh.workers.inventory import run_once as run_inventory
 from dh.workers.rdap import run_batch as run_rdap_batch
 from dh.workers.registrar import run_batch as run_registrar_batch
+from dh.workers.wayback import refresh_candidate as refresh_wayback_candidate
 from dh.workers.wayback import run_batch as run_wayback_batch
 
 SAFE_JOB_KINDS = frozenset(
@@ -60,8 +64,28 @@ def new_job_id() -> str:
     return str(uuid.uuid4())
 
 
+def should_throttle_load(load_15m: float, max_load_15m: float) -> bool:
+    return load_15m >= max_load_15m
+
+
 async def claim_next_job(worker_name: str) -> ClaimedJob | None:
     async with session_scope() as session:
+        try:
+            load_15m = os.getloadavg()[2]
+        except OSError:
+            load_15m = 0.0
+        if should_throttle_load(load_15m, settings.operator_max_load_15m):
+            await _heartbeat(
+                session,
+                worker_name,
+                "throttled",
+                None,
+                {
+                    "load_15m": round(load_15m, 2),
+                    "resume_below": settings.operator_max_load_15m,
+                },
+            )
+            return None
         job = (
             await session.execute(
                 select(OperatorJob)
@@ -77,6 +101,14 @@ async def claim_next_job(worker_name: str) -> ClaimedJob | None:
         job.state = "running"
         job.started_at = dt.datetime.now(dt.UTC)
         job.claimed_by = worker_name
+        session.add(
+            CandidateEvent(
+                event_type="job.running",
+                payload={"id": job.id, "kind": job.kind, "state": job.state},
+                config_version=job.config_version,
+                actor_device_id=job.created_by_device_id,
+            )
+        )
         await _heartbeat(session, worker_name, "running", job.id, {"kind": job.kind})
         return ClaimedJob(
             id=job.id,
@@ -121,6 +153,14 @@ async def finish_job(
         job.error = error[:4000] if error else None
         job.finished_at = dt.datetime.now(dt.UTC)
         job.active_key = None
+        session.add(
+            CandidateEvent(
+                event_type=f"job.{state}",
+                payload={"id": job.id, "kind": job.kind, "state": state},
+                config_version=job.config_version,
+                actor_device_id=job.created_by_device_id,
+            )
+        )
         if job.claimed_by:
             await _heartbeat(session, job.claimed_by, "idle", None, {"last_job": job.id})
 
@@ -153,6 +193,11 @@ async def _availability(job: ClaimedJob) -> dict[str, Any]:
 
 
 async def _wayback(job: ClaimedJob) -> dict[str, Any]:
+    candidate_id = job.payload.get("candidate_id")
+    if candidate_id is not None:
+        if isinstance(candidate_id, bool) or not isinstance(candidate_id, int):
+            raise ValueError("candidate_id must be an integer")
+        return {"processed": await refresh_wayback_candidate(candidate_id)}
     batch_size = min(20, max(1, _payload_int(job.payload, "batch_size", default=5)))
     return {
         "processed": await run_wayback_batch(
@@ -186,7 +231,7 @@ async def _dossier(job: ClaimedJob) -> dict[str, Any]:
 async def _backlinks(job: ClaimedJob) -> dict[str, Any]:
     candidate_id = _payload_int(job.payload, "candidate_id")
     try:
-        provider = DataForSEOBacklinkProvider()
+        provider = DataForSEOBacklinkProvider(candidate_id=candidate_id)
     except DataForSEOError as exc:
         raise PartialJobError(f"{exc}; backlink evidence remains pending") from exc
     try:
@@ -222,6 +267,7 @@ async def _backlinks(job: ClaimedJob) -> dict[str, Any]:
                         )
                     )
                 ).scalar_one_or_none()
+                is_new_observation = observation is None
                 if observation is None:
                     observation = LinkObservation(
                         source_page_id=page.id,
@@ -231,25 +277,32 @@ async def _backlinks(job: ClaimedJob) -> dict[str, Any]:
                         target_domain=candidate.domain,
                     )
                     session.add(observation)
-                observation.anchor_text = record.anchor
-                observation.context_text = " ".join(
-                    part for part in (record.text_before, record.text_after) if part
-                ) or None
-                observation.semantic_location = record.semantic_location
-                observation.rel_flags = [] if record.dofollow else ["nofollow"]
-                observation.is_editorial = record.semantic_location in {
-                    "article",
-                    "section",
-                    "main",
-                }
-                # Provider data is a prefilter. A later direct fetch must set
-                # currently_live before this can satisfy a readiness gate.
-                observation.currently_live = None
+                if is_new_observation:
+                    observation.anchor_text = record.anchor
+                    observation.context_text = " ".join(
+                        part for part in (record.text_before, record.text_after) if part
+                    ) or None
+                    observation.semantic_location = record.semantic_location
+                    observation.rel_flags = [] if record.dofollow else ["nofollow"]
+                    observation.is_editorial = record.semantic_location in {
+                        "article",
+                        "section",
+                        "main",
+                    }
+                    # Provider data is a prefilter. A direct fetch must set
+                    # currently_live before this can satisfy a readiness gate.
+                    observation.currently_live = None
+        validation = await validate_candidate_links(candidate_id, limit=min(20, len(records)))
+        async with session_scope() as session:
+            candidate = await session.get(Candidate, candidate_id)
+            if candidate is None:
+                raise ValueError("candidate not found")
             await assess_candidate(session, candidate)
-            return {
-                "referring_domains": summary.referring_domains,
-                "provider_records": len(records),
-            }
+        return {
+            "referring_domains": summary.referring_domains,
+            "provider_records": len(records),
+            "direct_validation": validation,
+        }
     except (ProviderBudgetExhaustedError, DataForSEOError) as exc:
         raise PartialJobError(f"{exc}; backlink evidence remains pending") from exc
     finally:

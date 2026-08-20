@@ -38,6 +38,12 @@ def upgrade() -> None:
     )
     op.add_column("candidates", sa.Column("promoted_at", sa.DateTime(timezone=True)))
     op.add_column("candidates", sa.Column("dossier_updated_at", sa.DateTime(timezone=True)))
+    op.create_index(
+        "ix_candidates_xd_review_dossier",
+        "candidates",
+        ["review_state", "dossier_updated_at"],
+        postgresql_where=sa.text("promoted_at IS NOT NULL"),
+    )
 
     op.add_column("registrar_quotes", sa.Column("availability_status", sa.String(32)))
     op.add_column("registrar_quotes", sa.Column("price_class", sa.String(16)))
@@ -101,12 +107,14 @@ def upgrade() -> None:
             """
         ).bindparams(
             config='{"schema_version":1,"core_tlds":["com","net","org","co","io","ai"],'
-            '"paid_enrichment":{"provider":"dataforseo","monthly_budget_micros":25000000},'
-            '"name":{"screen_min_score":65},'
+            '"paid_enrichment":{"provider":"dataforseo","monthly_budget_micros":25000000,'
+            '"operation_reserve_micros":100000},'
+            '"name":{"screen_min_score":65,"inventory_candidate_limit":1000},'
             '"authority":{"prefilter_min_referring_domains":10,'
             '"ready_thresholds_enabled":false},'
             '"crawler":{"concurrency":2,"max_pages_per_seed":25,'
-            '"max_response_bytes":2000000}}',
+            '"max_external_domains_per_page":200,"max_response_bytes":2000000,'
+            '"request_timeout_seconds":15,"minimum_delay_seconds":1}}',
             notes="XD v1 safe defaults",
         )
     )
@@ -192,6 +200,7 @@ def upgrade() -> None:
         sa.Column("http_status", sa.Integer()),
         sa.Column("content_type", sa.String(128)),
         sa.Column("etag", sa.Text()),
+        sa.Column("outgoing_urls", postgresql.JSONB()),
         sa.Column("content_hash", sa.LargeBinary(32)),
         sa.Column(
             "first_seen", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
@@ -258,6 +267,11 @@ def upgrade() -> None:
         "ix_lane_assessments_lane_state",
         "lane_assessments",
         ["lane", "state", "computed_at"],
+    )
+    op.create_index(
+        "ix_lane_assessments_config_lane_state_candidate",
+        "lane_assessments",
+        ["config_version", "lane", "state", "candidate_id"],
     )
     op.create_table(
         "gate_results",
@@ -410,6 +424,7 @@ def downgrade() -> None:
     op.drop_column("registrar_quotes", "expires_at")
     op.drop_column("registrar_quotes", "price_class")
     op.drop_column("registrar_quotes", "availability_status")
+    op.drop_index("ix_candidates_xd_review_dossier", table_name="candidates")
     op.drop_column("candidates", "dossier_updated_at")
     op.drop_column("candidates", "promoted_at")
     op.drop_column("candidates", "review_state")

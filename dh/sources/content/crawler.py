@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from dh.db.engine import session_scope
 from dh.db.models import Candidate, CrawlRun, CrawlSeed, LinkObservation, SourcePage
+from dh.engine.assessments import assess_candidate
 from dh.engine.configuration import get_active_config
 from dh.sources.content.parser import ExtractedLink, parse_html, parse_pdf_urls
 from dh.sources.content.security import Resolver, resolve_public_url, system_resolver
@@ -31,6 +32,12 @@ class FetchedPage:
     etag: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class CachedPage:
+    etag: str | None
+    outgoing_urls: tuple[str, ...]
+
+
 async def _fetch(
     client: httpx.AsyncClient,
     url: str,
@@ -39,22 +46,38 @@ async def _fetch(
     max_bytes: int,
     timeout_seconds: float,
     max_redirects: int = 5,
+    etag: str | None = None,
 ) -> FetchedPage:
     current = url
+    conditional_etag = etag
     for _ in range(max_redirects + 1):
         current = await resolve_public_url(current, resolver=resolver)
+        headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/pdf"}
+        if conditional_etag:
+            headers["If-None-Match"] = conditional_etag
         async with client.stream(
             "GET",
             current,
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/pdf"},
+            headers=headers,
             timeout=timeout_seconds,
             follow_redirects=False,
         ) as response:
+            if response.status_code == 304:
+                return FetchedPage(
+                    url=str(response.url),
+                    status=304,
+                    content_type=response.headers.get("content-type", "")
+                    .split(";", 1)[0]
+                    .lower(),
+                    content=b"",
+                    etag=response.headers.get("etag") or etag,
+                )
             if response.is_redirect:
                 location = response.headers.get("location")
                 if not location:
                     raise RuntimeError("redirect response had no location")
                 current = str(response.url.join(location))
+                conditional_etag = None
                 continue
             length = response.headers.get("content-length")
             if length and length.isdigit() and int(length) > max_bytes:
@@ -72,6 +95,45 @@ async def _fetch(
                 etag=response.headers.get("etag"),
             )
     raise RuntimeError("redirect limit exceeded")
+
+
+async def _cached_page(url: str) -> CachedPage:
+    async with session_scope() as session:
+        source = (
+            await session.execute(select(SourcePage).where(SourcePage.url == url))
+        ).scalar_one_or_none()
+        if source is None:
+            return CachedPage(etag=None, outgoing_urls=())
+        return CachedPage(
+            etag=source.etag,
+            outgoing_urls=tuple(source.outgoing_urls or ()),
+        )
+
+
+async def _touch_cached_page(url: str) -> tuple[str, ...]:
+    now = dt.datetime.now(dt.UTC)
+    async with session_scope() as session:
+        source = (
+            await session.execute(select(SourcePage).where(SourcePage.url == url))
+        ).scalar_one_or_none()
+        if source is None:
+            return ()
+        source.last_seen = now
+        observations = (
+            (
+                await session.execute(
+                    select(LinkObservation).where(
+                        LinkObservation.source_page_id == source.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for observation in observations:
+            observation.last_seen = now
+            observation.currently_live = True
+        return tuple(source.outgoing_urls or ())
 
 
 async def _robots_allows(
@@ -114,12 +176,42 @@ def _registrable_domain(url: str) -> str | None:
     return f"{result.domain}.{result.suffix}".lower()
 
 
+def prioritized_external_domains(
+    links: tuple[ExtractedLink, ...],
+    *,
+    source_url: str,
+    core_tlds: tuple[str, ...],
+    limit: int,
+) -> tuple[str, ...]:
+    """Select bounded core-TLD targets, preferring editorial follow links."""
+
+    core_suffixes = {f".{item}" for item in core_tlds}
+    source_domain = _registrable_domain(source_url)
+    domain_priority: dict[str, int] = {}
+    for item in links:
+        domain = _registrable_domain(item.url)
+        if domain is None or domain == source_domain or not any(
+            domain.endswith(suffix) for suffix in core_suffixes
+        ):
+            continue
+        priority = 2 if item.editorial and "nofollow" not in item.rel_flags else 1
+        domain_priority[domain] = max(domain_priority.get(domain, 0), priority)
+    return tuple(
+        sorted(
+            domain_priority,
+            key=lambda domain: (-domain_priority[domain], domain),
+        )[:limit]
+    )
+
+
 async def _persist_page(
     *,
     seed: CrawlSeed,
     fetched: FetchedPage,
     title: str | None,
     links: tuple[ExtractedLink, ...],
+    core_tlds: tuple[str, ...],
+    max_external_domains: int,
 ) -> int:
     now = dt.datetime.now(dt.UTC)
     async with session_scope() as session:
@@ -142,26 +234,46 @@ async def _persist_page(
         source.etag = fetched.etag
         source.content_hash = hashlib.sha256(fetched.content).digest()
         source.title = title
-
-        domains = sorted(
+        source.outgoing_urls = sorted(
             {
-                domain
+                item.url
                 for item in links
-                if (domain := _registrable_domain(item.url)) is not None
+                if urlsplit(item.url).hostname == seed.allowed_host
             }
+        )[:500]
+
+        domains = prioritized_external_domains(
+            links,
+            source_url=fetched.url,
+            core_tlds=core_tlds,
+            limit=max_external_domains,
         )
-        candidate_rows: list[Candidate] = []
-        if domains:
-            candidate_rows = list(
-                (
-                    await session.execute(
-                        select(Candidate).where(Candidate.domain.in_(domains))
-                    )
+        candidate_rows = list(
+            (
+                await session.execute(
+                    select(Candidate).where(Candidate.domain.in_(domains))
                 )
-                .scalars()
-                .all()
             )
-        candidates = {row.domain: row.id for row in candidate_rows}
+            .scalars()
+            .all()
+        )
+        candidates_by_domain = {row.domain: row for row in candidate_rows}
+        for domain in domains:
+            if domain in candidates_by_domain:
+                candidates_by_domain[domain].last_observed = now
+                continue
+            candidate = Candidate(
+                domain=domain,
+                first_observed=now,
+                last_observed=now,
+                lifecycle_state="observed",
+                review_state="research",
+            )
+            session.add(candidate)
+            candidate_rows.append(candidate)
+            candidates_by_domain[domain] = candidate
+        await session.flush()
+        candidates = {domain: row.id for domain, row in candidates_by_domain.items()}
         existing = (
             (
                 await session.execute(
@@ -171,6 +283,10 @@ async def _persist_page(
             .scalars()
             .all()
         )
+        # A successful re-fetch is a fresh snapshot. Links not present in the
+        # new document must stop counting as currently live.
+        for observation in existing:
+            observation.currently_live = False
         by_hash = {row.target_url_hash: row for row in existing}
         persisted = 0
         for item in links:
@@ -190,7 +306,8 @@ async def _persist_page(
                 session.add(observation)
                 by_hash[digest] = observation
                 persisted += 1
-            observation.candidate_id = candidates.get(target_domain)
+            if candidate_id := candidates.get(target_domain):
+                observation.candidate_id = candidate_id
             observation.anchor_text = item.anchor
             observation.context_text = item.context
             observation.semantic_location = item.semantic_location
@@ -199,6 +316,9 @@ async def _persist_page(
             observation.is_sitewide = item.semantic_location in {"nav", "footer", "header"}
             observation.currently_live = True
             observation.last_seen = now
+        await session.flush()
+        for candidate in candidate_rows:
+            await assess_candidate(session, candidate)
         return persisted
 
 
@@ -252,13 +372,28 @@ async def run_seed(
                     timeout_seconds=config.crawler.request_timeout_seconds,
                 ):
                     continue
+                cached = await _cached_page(normalized)
                 fetched = await _fetch(
                     client,
                     normalized,
                     resolver=resolver,
                     max_bytes=config.crawler.max_response_bytes,
                     timeout_seconds=config.crawler.request_timeout_seconds,
+                    etag=cached.etag,
                 )
+                if fetched.status == 304:
+                    outgoing = await _touch_cached_page(fetched.url)
+                    pages_fetched += 1
+                    for next_url in outgoing or cached.outgoing_urls:
+                        if (
+                            urlsplit(next_url).hostname == seed_snapshot.allowed_host
+                            and next_url not in seen
+                        ):
+                            queue.append(next_url)
+                    await asyncio.sleep(config.crawler.minimum_delay_seconds)
+                    continue
+                if not 200 <= fetched.status < 300:
+                    raise RuntimeError(f"source page returned HTTP {fetched.status}")
                 if fetched.content_type == "text/html":
                     title, links = parse_html(fetched.content, fetched.url)
                 elif fetched.content_type == "application/pdf":
@@ -270,6 +405,8 @@ async def run_seed(
                     fetched=fetched,
                     title=title,
                     links=links,
+                    core_tlds=config.core_tlds,
+                    max_external_domains=config.crawler.max_external_domains_per_page,
                 )
                 pages_fetched += 1
                 for item in links:

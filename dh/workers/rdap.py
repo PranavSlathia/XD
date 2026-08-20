@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dh.config import settings
 from dh.db.engine import session_scope
-from dh.db.models import AvailabilityCheck, Candidate, RdapSnapshot
+from dh.db.models import AvailabilityCheck, Candidate, CandidateEvent, RdapSnapshot
 from dh.logging import configure_logging, log
 from dh.opportunity import MODEL_VERSION
 from dh.sources.rdap.client import AvailabilityResult, check_availability
@@ -36,6 +36,17 @@ def _expiry_to_date(value: str | None) -> dt.date | None:
         except ValueError:
             return None
     return parsed.date()
+
+
+def lifecycle_from_status(status: str) -> str | None:
+    return {
+        "available": "available",
+        "pending_delete": "pending_delete",
+        "redemption_period": "redemption_period",
+        "expiring_soon": "expiring_soon",
+        "registered": "registered",
+        "unavailable": "registered",
+    }.get(status)
 
 
 async def _claim_batch(session: AsyncSession, *, batch_size: int) -> list[tuple[int, str]]:
@@ -163,9 +174,27 @@ async def _persist(session: AsyncSession, candidate_id: int, avail: Availability
     if avail.confidence == "authoritative":
         cand = await session.get(Candidate, candidate_id)
         if cand is not None:
+            previous_status = cand.current_status
+            next_lifecycle = lifecycle_from_status(avail.status)
             cand.current_status = avail.status
             cand.availability_confidence = avail.confidence
+            if next_lifecycle is not None:
+                cand.lifecycle_state = next_lifecycle
             cand.score_version = None
+            if cand.promoted_at is not None and previous_status != avail.status:
+                session.add(
+                    CandidateEvent(
+                        candidate_id=candidate_id,
+                        event_type="availability.changed",
+                        payload={
+                            "domain": cand.domain,
+                            "source": avail.source,
+                            "previous_status": previous_status,
+                            "availability_status": avail.status,
+                            "lifecycle_state": cand.lifecycle_state,
+                        },
+                    )
+                )
 
 
 async def run_batch(*, batch_size: int, concurrency: int = 4) -> int:

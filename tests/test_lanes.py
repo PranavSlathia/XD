@@ -59,6 +59,39 @@ def test_direct_editorial_link_can_enter_authority_research() -> None:
 
     assert result.screen_passed is True
     assert result.verified_independent_domains == 1
+    assert result.relevant_independent_domains == 1
+
+
+def test_irrelevant_link_can_enter_research_but_not_pass_topical_evidence() -> None:
+    result = screen_authority(
+        AuthorityScreenInput(
+            domain="plainname.org",
+            observed_links=(
+                AuthorityLink(
+                    source_domain="irrelevant.example",
+                    source_url="https://irrelevant.example/resources",
+                    live=True,
+                    editorial=True,
+                    followable=True,
+                    relevant=False,
+                ),
+                AuthorityLink(
+                    source_domain="plainname.org",
+                    source_url="https://www.plainname.org/archive",
+                    live=True,
+                    editorial=True,
+                    followable=True,
+                    relevant=True,
+                    independent=False,
+                ),
+            ),
+        )
+    )
+
+    assert result.screen_passed is True
+    assert result.verified_independent_domains == 1
+    assert result.relevant_independent_domains == 0
+    assert "topical relevance validation" in result.missing_evidence
 
 
 def test_ready_can_come_from_either_lane_without_compensation() -> None:

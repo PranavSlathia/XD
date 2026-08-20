@@ -76,3 +76,9 @@ def evaluate_readiness(
         failed=tuple(failed),
         fatal_failures=tuple(fatal),
     )
+
+
+def review_transition_allowed(current: str, requested: str) -> bool:
+    """Reject is terminal until an operator records an explicit Research reopen."""
+
+    return current != "reject" or requested == "research"

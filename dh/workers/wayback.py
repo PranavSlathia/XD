@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dh.config import settings
 from dh.db.engine import session_scope
-from dh.db.models import Candidate, WaybackSnapshot
+from dh.db.models import Candidate, CandidateEvent, WaybackSnapshot
 from dh.logging import configure_logging, log
 from dh.opportunity import MODEL_VERSION
 from dh.sources.wayback.cdx import CdxSummary, fetch_cdx
@@ -114,6 +114,33 @@ async def _persist(session: AsyncSession, candidate_id: int, cdx: CdxSummary) ->
     cand = await session.get(Candidate, candidate_id)
     if cand is not None:
         cand.score_version = None
+        if cand.promoted_at is not None:
+            session.add(
+                CandidateEvent(
+                    candidate_id=candidate_id,
+                    event_type="wayback.changed",
+                    payload={
+                        "domain": cand.domain,
+                        "capture_count": cdx.capture_count,
+                        "first_capture": cdx.first_capture,
+                        "last_capture": cdx.last_capture,
+                    },
+                )
+            )
+
+
+async def refresh_candidate(candidate_id: int) -> int:
+    """Refresh one XD candidate without applying the legacy marketplace cohort filter."""
+
+    async with session_scope() as session:
+        candidate = await session.get(Candidate, candidate_id)
+        if candidate is None:
+            raise ValueError("candidate not found")
+        domain = candidate.domain
+    summary = await fetch_cdx(domain)
+    async with session_scope() as session:
+        await _persist(session, candidate_id, summary)
+    return 1
 
 
 async def run_batch(*, batch_size: int, top_n: int, concurrency: int = 2) -> int:

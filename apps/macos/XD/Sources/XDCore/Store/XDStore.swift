@@ -412,7 +412,9 @@ public final class XDStore {
     ) async {
         guard canMutate, let baseURL, let token else { return }
         var payload: [String: JSONValue] = [:]
-        if kind.needsCandidate, let candidateID { payload["candidate_id"] = .number(Double(candidateID)) }
+        if kind.acceptsCandidate, let candidateID {
+            payload["candidate_id"] = .number(Double(candidateID))
+        }
         if kind.needsSeed, let seedID { payload["seed_id"] = .number(Double(seedID)) }
         if [.availabilityRefresh, .waybackRefresh].contains(kind) {
             payload["batch_size"] = .number(Double(batchSize))
@@ -574,7 +576,9 @@ public final class XDStore {
                         defaults.set(cursor, forKey: Keys.lastEventID)
                         events.insert(event, at: 0)
                         if events.count > 250 { events.removeLast(events.count - 250) }
-                        if !event.read, notifiableEventTypes.contains(event.eventType) {
+                        if !event.read,
+                           event.candidateId != nil,
+                           notifiableEventTypes.contains(event.eventType) {
                             await notifications.post(event)
                         }
                         await refreshAfterEvent(event)

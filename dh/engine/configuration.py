@@ -38,6 +38,7 @@ class CrawlerConfig(BaseModel):
 
     concurrency: int = Field(default=2, ge=1, le=4)
     max_pages_per_seed: int = Field(default=25, ge=1, le=250)
+    max_external_domains_per_page: int = Field(default=200, ge=1, le=1_000)
     max_response_bytes: int = Field(default=2_000_000, ge=100_000, le=10_000_000)
     request_timeout_seconds: float = Field(default=15.0, ge=2.0, le=60.0)
     minimum_delay_seconds: float = Field(default=1.0, ge=0.25, le=30.0)
