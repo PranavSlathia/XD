@@ -182,34 +182,7 @@ public struct XDClient: Sendable {
     public static let preview = XDClient(
         fetchToday: { _, _ in XDFixtures.today },
         fetchCandidates: { _, _, _ in CandidatePage(items: XDFixtures.candidates, nextCursor: nil) },
-        fetchCandidate: { _, _, id in
-            guard id == XDFixtures.detail.id else {
-                var detail = XDFixtures.detail
-                return CandidateDetail(
-                    id: id,
-                    domain: XDFixtures.candidates.first(where: { $0.id == id })?.domain ?? detail.domain,
-                    lanes: detail.lanes,
-                    hybrid: detail.hybrid,
-                    nameSubtype: detail.nameSubtype,
-                    nameScore: detail.nameScore,
-                    authorityScore: detail.authorityScore,
-                    reviewState: detail.reviewState,
-                    lifecycleState: detail.lifecycleState,
-                    currentStatus: detail.currentStatus,
-                    availabilityConfidence: detail.availabilityConfidence,
-                    promotedAt: detail.promotedAt,
-                    lastObserved: detail.lastObserved,
-                    dossierUpdatedAt: detail.dossierUpdatedAt,
-                    assessments: detail.assessments,
-                    gates: detail.gates,
-                    dossiers: detail.dossiers,
-                    links: detail.links,
-                    quotes: detail.quotes,
-                    reviews: detail.reviews
-                )
-            }
-            return XDFixtures.detail
-        },
+        fetchCandidate: { _, _, id in XDFixtures.detail(for: id) },
         reviewCandidate: { _, _, _, request in
             CandidateReview(
                 id: Int.random(in: 1...10_000),

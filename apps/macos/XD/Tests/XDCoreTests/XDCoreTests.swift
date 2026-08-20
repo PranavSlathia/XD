@@ -92,4 +92,16 @@ final class XDCoreTests: XCTestCase {
         XCTAssertEqual(value.lanes, [.name])
         XCTAssertFalse(value.hybrid)
     }
+
+    func testPreviewCandidateDetailMatchesTheSelectedDomain() async throws {
+        let value = try await XDClient.preview.fetchCandidate(
+            try XCTUnwrap(URL(string: "http://preview.test")),
+            "preview-token",
+            102
+        )
+
+        XCTAssertEqual(value.domain, "SummitVector.io")
+        XCTAssertEqual(value.assessments[0].signals["exact_match"], .string("SummitVector.io"))
+        XCTAssertTrue(value.links.allSatisfy { $0.targetURL.contains("SummitVector.io") })
+    }
 }

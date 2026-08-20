@@ -183,6 +183,162 @@ public enum XDFixtures {
         reviews: []
     )
 
+    public static func detail(for id: Int) -> CandidateDetail {
+        guard let candidate = candidates.first(where: { $0.id == id }) else { return detail }
+        if candidate.id == detail.id { return detail }
+
+        let profile: (
+            referringDomains: Int,
+            backlinks: Int,
+            domainRank: Int,
+            pageRank: Int,
+            spamScore: String,
+            liveLinks: Int,
+            registrationMicros: Int,
+            nameThesis: String,
+            authorityThesis: String
+        )
+        if candidate.id == 102 {
+            profile = (
+                98,
+                412,
+                28,
+                24,
+                "2%",
+                9,
+                39_000_000,
+                "A clear directional compound for analytics, mapping, and technical software.",
+                "Nine independent editorial references remain live across technical publishers."
+            )
+        } else {
+            profile = (
+                76,
+                288,
+                24,
+                21,
+                "3%",
+                7,
+                11_600_000,
+                "A memorable communications compound suited to maritime and monitoring products.",
+                "Seven independent citations remain live across association and publisher archives."
+            )
+        }
+
+        let assessments = [
+            LaneAssessment(
+                lane: .name,
+                nameSubtype: candidate.nameSubtype,
+                state: "qualified",
+                screenPassed: true,
+                laneScore: candidate.nameScore,
+                modelVersion: "name-screen-v1",
+                configVersion: 1,
+                computedAt: now,
+                signals: [
+                    "commercial_fit": .string("strong"),
+                    "exact_match": .string(candidate.domain),
+                    "trademark_check": .string("Clear"),
+                    "search_interest": .string("Consistent"),
+                    "type_in_potential": .string("Strong"),
+                    "name_quality": .string("High"),
+                ],
+                reasons: ["Natural commercial compound", "Unambiguous spelling"],
+                missingEvidence: []
+            ),
+            LaneAssessment(
+                lane: .authority,
+                nameSubtype: nil,
+                state: "qualified",
+                screenPassed: true,
+                laneScore: candidate.authorityScore,
+                modelVersion: "authority-rubric-v1",
+                configVersion: 1,
+                computedAt: now,
+                signals: [
+                    "verified_sources": .number(Double(profile.liveLinks)),
+                    "referring_domains": .number(Double(profile.referringDomains)),
+                    "backlinks": .number(Double(profile.backlinks)),
+                    "domain_rank": .number(Double(profile.domainRank)),
+                    "page_rank": .number(Double(profile.pageRank)),
+                    "anchor_diversity": .string("Good"),
+                    "spam_score": .string(profile.spamScore),
+                    "archive_history": .string("Clean"),
+                ],
+                reasons: ["Independent editorial citations", "Topically consistent"],
+                missingEvidence: []
+            ),
+        ]
+        let links = (1...profile.liveLinks).map { index in
+            LinkEvidence(
+                sourceURL: "https://publisher.example.org/resources/\(candidate.id)/\(index)",
+                sourceDomain: index.isMultiple(of: 2)
+                    ? "publisher.example.org"
+                    : "association.example.net",
+                targetURL: "https://\(candidate.domain)/guide",
+                anchorText: "\(candidate.domain) reference",
+                contextText: "Independent editorial reference in a maintained resource page.",
+                semanticLocation: "article",
+                relFlags: [],
+                isEditorial: true,
+                currentlyLive: true,
+                lastSeen: now.addingTimeInterval(Double(-index * 300))
+            )
+        }
+        return CandidateDetail(
+            id: candidate.id,
+            domain: candidate.domain,
+            lanes: candidate.lanes,
+            hybrid: candidate.hybrid,
+            nameSubtype: candidate.nameSubtype,
+            nameScore: candidate.nameScore,
+            authorityScore: candidate.authorityScore,
+            reviewState: candidate.reviewState,
+            lifecycleState: candidate.lifecycleState,
+            currentStatus: candidate.currentStatus,
+            availabilityConfidence: candidate.availabilityConfidence,
+            promotedAt: candidate.promotedAt,
+            lastObserved: candidate.lastObserved,
+            dossierUpdatedAt: candidate.dossierUpdatedAt,
+            assessments: assessments,
+            gates: detail.gates,
+            dossiers: [
+                Dossier(
+                    lane: .name,
+                    status: "complete",
+                    generatedAt: now,
+                    thesis: profile.nameThesis,
+                    buyerThesis: ["categories": .array([.string("commercial software")])],
+                    comparableSales: [],
+                    risks: [],
+                    evidenceSummary: ["type_in_potential": .string("strong")]
+                ),
+                Dossier(
+                    lane: .authority,
+                    status: "complete",
+                    generatedAt: now,
+                    thesis: profile.authorityThesis,
+                    buyerThesis: ["use": .string("legitimate topical publishing")],
+                    comparableSales: [],
+                    risks: [],
+                    evidenceSummary: ["live_sources": .number(Double(profile.liveLinks))]
+                ),
+            ],
+            links: links,
+            quotes: [
+                RegistrarQuote(
+                    registrar: "porkbun",
+                    availabilityStatus: "available",
+                    priceClass: "normal",
+                    quotePriceMicros: profile.registrationMicros,
+                    quoteCurrency: "USD",
+                    observedAt: now,
+                    expiresAt: now.addingTimeInterval(900)
+                )
+            ],
+            reviews: []
+        )
+    }
+
     public static let runs: [EngineRun] = [
         EngineRun(
             id: "discovery:52",
