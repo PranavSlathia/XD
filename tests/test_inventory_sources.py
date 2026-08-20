@@ -194,7 +194,7 @@ def test_namebio_stats_segment_compound_and_preserve_attribution_evidence() -> N
     assert evidence is not None
     assert evidence.terms == ("finance", "brokerage")
     assert evidence.sale_count_floor == 10
-    assert evidence.price_avg_floor == pytest.approx(1170.6, abs=0.1)
+    assert abs(evidence.price_avg_floor - 1170.6) < 0.1
 
 
 def test_detail_budget_prioritizes_demand_over_raw_authority_rank() -> None:
