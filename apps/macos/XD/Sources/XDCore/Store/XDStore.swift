@@ -28,10 +28,10 @@ public enum AppSection: String, CaseIterable, Identifiable, Sendable {
 
     public var symbol: String {
         switch self {
-        case .today: "tray.full"
-        case .nameAssets: "textformat.abc"
-        case .authorityAssets: "link"
-        case .hybrids: "square.3.layers.3d"
+        case .today: "chart.xyaxis.line"
+        case .nameAssets: "person"
+        case .authorityAssets: "shield"
+        case .hybrids: "link"
         case .watchlist: "eye"
         case .runs: "play"
         case .portfolio: "briefcase"

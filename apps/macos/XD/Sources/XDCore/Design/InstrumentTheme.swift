@@ -67,13 +67,12 @@ public struct InstrumentButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 50)
             .padding(.horizontal, 14)
             .background(
-                background.opacity(
-                    isEnabled ? (configuration.isPressed ? 0.72 : 1) : 0.28
-                )
+                (isEnabled ? background : theme.panel)
+                    .opacity(configuration.isPressed && isEnabled ? 0.72 : 1)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(border.opacity(isEnabled ? 1 : 0.35), lineWidth: 1)
+                    .stroke(isEnabled ? border : theme.line, lineWidth: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 4))
             .contentShape(Rectangle())
