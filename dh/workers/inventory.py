@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dh.config import settings
 from dh.db.engine import session_scope
 from dh.db.models import (
+    AvailabilityCheck,
     Candidate,
     DiscoveryRun,
     MarketplaceListing,
@@ -238,12 +239,6 @@ async def _persist_matches(
             session.add(candidate)
             candidates[record.domain] = candidate
         candidate.last_observed = observed_at
-        # The marketplace feed is acquisition evidence, but RDAP is the
-        # authoritative lifecycle source. A later inventory refresh must never
-        # downgrade an existing RDAP confirmation back to "probable".
-        if candidate.availability_confidence != "authoritative":
-            candidate.current_status = "pending_delete"
-            candidate.availability_confidence = "probable"
         candidate.open_pagerank = record.open_pagerank
         candidate.referring_domains = record.referring_domains
         candidate.authority_rank = record.rank
@@ -251,6 +246,45 @@ async def _persist_matches(
         candidate.authority_observed_at = observed_at
         candidate.score_version = None
     await session.flush()
+
+    candidate_ids = [candidates[record.domain].id for record in records]
+    fresh_cutoff = observed_at - dt.timedelta(hours=settings.rdap_active_stale_hours)
+    fresh_rows = (
+        (
+            await session.execute(
+                select(AvailabilityCheck)
+                .where(
+                    AvailabilityCheck.candidate_id.in_(candidate_ids),
+                    AvailabilityCheck.is_authoritative.is_(True),
+                    AvailabilityCheck.observed_at >= fresh_cutoff,
+                )
+                .order_by(
+                    AvailabilityCheck.candidate_id,
+                    AvailabilityCheck.observed_at.desc(),
+                    AvailabilityCheck.id.desc(),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    fresh_authoritative: dict[int, AvailabilityCheck] = {}
+    for check in fresh_rows:
+        fresh_authoritative.setdefault(check.candidate_id, check)
+    for record in records:
+        candidate = candidates[record.domain]
+        if candidate.availability_confidence == "authoritative":
+            continue
+        # The marketplace feed is acquisition evidence, but RDAP is the
+        # authoritative lifecycle source. Restore a fresh RDAP result if an
+        # older worker version downgraded the denormalized candidate column.
+        check = fresh_authoritative.get(candidate.id)
+        if check is not None and check.status is not None:
+            candidate.current_status = check.status
+            candidate.availability_confidence = "authoritative"
+        else:
+            candidate.current_status = "pending_delete"
+            candidate.availability_confidence = "probable"
 
     external_keys = [feed_by_domain[record.domain].external_key for record in records]
     existing_listings = (
@@ -267,7 +301,6 @@ async def _persist_matches(
     )
     listings = {listing.external_key: listing for listing in existing_listings}
 
-    candidate_ids = [candidates[record.domain].id for record in records]
     existing_assessments = (
         (
             await session.execute(

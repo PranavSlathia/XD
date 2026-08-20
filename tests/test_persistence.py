@@ -224,22 +224,31 @@ async def test_inventory_refresh_preserves_authoritative_rdap_state(
     from sqlalchemy import select
 
     from dh.db.engine import session_scope
-    from dh.db.models import Candidate
+    from dh.db.models import AvailabilityCheck, Candidate
     from dh.sources.marketplace.dropcatch import DropCatchListing
     from dh.sources.openpagerank.top_domains import TopDomainRecord
     from dh.workers.inventory import _persist_matches
 
     domain = "authoritative-state-preserved.example"
+    observed_at = dt.datetime.now(dt.UTC)
     async with session_scope() as session:
+        candidate = Candidate(
+            domain=domain,
+            current_status="pending_delete",
+            availability_confidence="probable",
+        )
+        session.add(candidate)
+        await session.flush()
         session.add(
-            Candidate(
-                domain=domain,
-                current_status="registered",
-                availability_confidence="authoritative",
+            AvailabilityCheck(
+                candidate_id=candidate.id,
+                observed_at=observed_at,
+                source="rdap",
+                status="registered",
+                is_authoritative=True,
             )
         )
 
-    observed_at = dt.datetime.now(dt.UTC)
     record = TopDomainRecord(
         domain=domain,
         rank=100_000,
