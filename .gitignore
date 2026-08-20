@@ -31,6 +31,10 @@ data/
 # Build
 dist/
 build/
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
 
 # IDE
 .idea/

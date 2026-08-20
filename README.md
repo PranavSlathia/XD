@@ -1,13 +1,14 @@
 # Domain Hunter
 
-Always-on, evidence-first research pipeline for expiring `.com` domains. It
-continuously narrows public pending-delete inventory to a small queue that is
-worth human diligence. It does **not** buy, bid, backorder, list, or contact
-anyone.
+XD is an always-on, evidence-first research system for `.com`, `.net`, `.org`,
+`.co`, `.io`, and `.ai`. It evaluates commercially strong **Name Assets** and
+verified-link **Authority Assets** independently; a Hybrid passes both. It does
+**not** buy, bid, backorder, register, list, contact, or spend.
 
 Repo `PranavSlathia/XD`, deployed at `~/docker/domain-hunter/` on Dell
-`100.103.66.92`. The API binds to localhost on port `8007`; Vulture is the
-optional Discord operator surface. There is intentionally no public dashboard.
+`100.103.66.92`. The API binds to localhost on port `8007`. The private macOS
+client lives at `apps/macos/XD`; Vulture remains during a minimum 14-day parity
+period. There is no public dashboard.
 
 ## What runs by default
 
@@ -19,44 +20,50 @@ optional Discord operator surface. There is intentionally no public dashboard.
 - `dh-worker-rdap` — authoritative registration-state confirmation.
 - `dh-worker-wayback` — archive-history metadata for active candidates.
 - `dh-worker-scoring` — legacy candidate score maintenance.
+- `dh-worker-operator` — low-concurrency, typed jobs and bounded content crawls.
 - `vulture` — Discord commands and a daily research digest when configured.
 
-The old GitHub miner and LLM classifier are available only through the
-`experimental` Compose profile. Hand-registration quotes are in the
-`hand-registration` profile. The dead Redis scheduler is gone; every active
-worker owns its own bounded loop.
+GitHub discovery is permanently retired; historical evidence remains. Read-only
+registrar quotes are available through the `hand-registration` profile and typed
+availability jobs. The dead Redis scheduler is gone.
 
-## Current pipeline
+## XD pipeline
 
-1. Download DropCatch's public five-day pending-delete feed every six hours.
-2. Keep clean alphabetic `.com` names of practical length.
-3. Intersect them locally with the cached OpenPageRank Top-10-Million dataset.
-4. Join NameBio's free, attribution-required RetailStats data. Compound names
-   use a conservative word split and the weakest relevant keyword placement;
-   overlapping sales are never added together.
-5. Detect suspicious batches with near-identical authority metrics.
-6. Prioritize the bounded public price/deadline lookups by market evidence,
-   anomaly status, and score—not raw PageRank alone.
-7. Persist the listing, provenance, source version, run metrics, and separate
-   authority, resale, risk, confidence, and overall scores.
-8. Confirm status through RDAP and collect Wayback metadata.
-9. Surface `research`, `observe`, or `reject`. Only a human can turn research
-   into an acquisition decision.
+1. Normalize observations from full expiry inventory and allowlisted content
+   sources.
+2. Run cheap independent Name and Authority screens. The complete inventory is
+   screened for names before any authority intersection.
+3. Promote only observations that clear at least one lane's first-stage screen.
+4. Collect expensive evidence for the bounded best subset: name demand/comps or
+   directly verified referring pages.
+5. Apply versioned lane and shared gates, including rights/history/reputation and
+   authoritative registrar availability with a current standard-price quote.
+6. Generate lane-specific dossiers. A language model can explain evidence but
+   cannot promote a domain.
+7. Surface Research, Ready, or Reject for append-only human review; store later
+   commercial outcomes for calibration.
 
-An automatic `research` verdict is deliberately incomplete. The following
-remain mandatory before spending money:
+Research is deliberately incomplete. Ready remains blocked until the selected
+lane's evidence and every shared gate pass, including:
 
 - archive content review;
 - independent backlink/profile review;
 - trademark and former-brand clearance;
 - domain-specific comparable sales;
 - a credible end-user buyer thesis; and
-- an operator-set maximum bid.
+- a current normal-price registrar quote.
 
-Authority is not resale value, a pending-delete listing is not guaranteed
-availability, and an automated score is never permission to acquire.
+Authority is not name quality, name quality does not require backlinks, and no
+automated state is permission to acquire.
 
 ## API
+
+Device-authenticated API v1 includes Today, lane-filtered candidates, guarded
+reviews, SSE events/global read receipts, runs/workers, typed jobs, versioned
+configuration, pairing/revocation, dossiers, and commercial outcomes under
+`/api/v1`. Run `GET /openapi.json` for the exact schemas.
+
+Legacy migration endpoints remain available:
 
 - `GET /health` — DB and Redis liveness.
 - `GET /api/pipeline/status` — latest run and funnel counts.
@@ -90,8 +97,9 @@ reference data stay outside Git.
 
 ## Durable docs
 
-- `docs/ALWAYS_ON_PIPELINE.md` — current product contract, operations, evidence
-  gates, failure modes, and upgrade path.
+- `docs/XD-PRD.md` — current product and rollout source of truth.
+- `docs/ALWAYS_ON_PIPELINE.md` — historical deployed pipeline retained for
+  migration/parity.
 - `docs/CANDIDATE_REVIEW-2026-08-20.md` — first real-feed validation and manual
   accept/reject record.
 - `docs/CZDS_APPLICATIONS.md` — truthful CZDS use guidance; never misrepresent a
@@ -99,5 +107,4 @@ reference data stay outside Git.
 - `CLAUDE.md` — engineering and Dell isolation rules.
 
 The older PRD, research dossier, tech-stack log, and implementation audit are
-historical design records. Where they conflict with the current pipeline, this
-README and `docs/ALWAYS_ON_PIPELINE.md` win.
+historical records. Where they conflict, `docs/XD-PRD.md` wins.

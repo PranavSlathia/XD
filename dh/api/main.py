@@ -39,6 +39,7 @@ from dh.api.schemas import (
     ScoringWeightsItem,
     WaybackEvidence,
 )
+from dh.api.v1 import router as v1_router
 from dh.config import settings
 from dh.db.engine import get_engine, session_scope
 from dh.db.models import (
@@ -71,6 +72,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Domain Hunter API", lifespan=_lifespan)
+app.include_router(v1_router)
 instrument_fastapi(app)
 
 # Prometheus exporter — best-effort; safe if dependency is absent.

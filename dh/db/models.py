@@ -126,6 +126,17 @@ class Candidate(Base):
     )
     hard_filtered: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     hard_filter_reason: Mapped[str | None] = mapped_column(String(64))
+    # XD v1 keeps lifecycle, promotion, and operator review independent.  The
+    # legacy ``current_status`` column remains as an evidence denormalization
+    # for old workers and API clients.
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'observed'")
+    )
+    review_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'research'")
+    )
+    promoted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    dossier_updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
     mentions: Mapped[list[SourceMention]] = relationship(back_populates="candidate")
     marketplace_listings: Mapped[list[MarketplaceListing]] = relationship(
@@ -165,7 +176,11 @@ class SourceMention(Base):
     candidate: Mapped[Candidate] = relationship(back_populates="mentions")
 
     __table_args__ = (
-        UniqueConstraint("source_url_hash", "cited_url_hash"),
+        UniqueConstraint(
+            "source_url_hash",
+            "cited_url_hash",
+            name="uq_source_mentions_source_cited_hashes",
+        ),
         Index("ix_source_mentions_candidate_context", "candidate_id", "context_type"),
         Index("ix_source_mentions_source_url_hash", "source_url_hash"),
         Index("ix_source_mentions_cited_url_hash", "cited_url_hash"),
@@ -391,6 +406,9 @@ class RegistrarQuote(Base):
     renewal_price_micros: Mapped[int | None] = mapped_column(BigInteger)
     quote_currency: Mapped[str] = mapped_column(String(3), server_default=text("'USD'"))
     api_cost_micros: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    availability_status: Mapped[str | None] = mapped_column(String(32))
+    price_class: Mapped[str | None] = mapped_column(String(16))
+    expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     __table_args__ = (
@@ -413,22 +431,398 @@ class Outcome(Base):
     acquisition_channel: Mapped[str | None] = mapped_column(String(64))
 
 
+# --------------------------------------------------------------------------- #
+# XD v1: independent lanes, gates, dossiers, crawl evidence, and operator state
+# --------------------------------------------------------------------------- #
+
+
+class EngineConfigVersion(Base):
+    """Immutable engine configuration; exactly one version is active."""
+
+    __tablename__ = "engine_config_versions"
+
+    version: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_by_device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("device_credentials.id", ondelete="SET NULL")
+    )
+    parent_version: Mapped[int | None] = mapped_column(
+        ForeignKey("engine_config_versions.version", ondelete="SET NULL")
+    )
+    config_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    activated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index(
+            "uq_engine_config_versions_single_active",
+            "is_active",
+            unique=True,
+            postgresql_where=text("is_active"),
+        ),
+    )
+
+
+class LaneAssessment(Base):
+    """Independent Name or Authority judgement; scores never cross lanes."""
+
+    __tablename__ = "lane_assessments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
+    lane: Mapped[str] = mapped_column(String(16), nullable=False)
+    name_subtype: Mapped[str | None] = mapped_column(String(32))
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    screen_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    lane_score: Mapped[float | None] = mapped_column(Numeric)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    config_version: Mapped[int] = mapped_column(
+        ForeignKey("engine_config_versions.version"), nullable=False
+    )
+    computed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    signals: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    missing_evidence: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "lane", "config_version"),
+        Index("ix_lane_assessments_lane_state", "lane", "state", "computed_at"),
+    )
+
+
+class GateResult(Base):
+    """Versioned hard-gate result. Missing evidence is always ``pending``."""
+
+    __tablename__ = "gate_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
+    lane: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'shared'"))
+    gate_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    fatal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    config_version: Mapped[int] = mapped_column(
+        ForeignKey("engine_config_versions.version"), nullable=False
+    )
+    evaluated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    details: Mapped[str | None] = mapped_column(Text)
+    evidence_refs: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "lane", "gate_key", "config_version"),
+        Index("ix_gate_results_candidate_state", "candidate_id", "state"),
+    )
+
+
+class CandidateDossier(Base):
+    __tablename__ = "candidate_dossiers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
+    lane: Mapped[str] = mapped_column(String(16), nullable=False)
+    config_version: Mapped[int] = mapped_column(
+        ForeignKey("engine_config_versions.version"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    generated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    thesis: Mapped[str | None] = mapped_column(Text)
+    buyer_thesis: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    comparable_sales: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    risks: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    evidence_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    __table_args__ = (UniqueConstraint("candidate_id", "lane", "config_version"),)
+
+
+class CrawlSeed(Base):
+    __tablename__ = "crawl_seeds"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    allowed_host: Mapped[str] = mapped_column(String(253), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    terms_verified_at: Mapped[dt.date | None] = mapped_column(Date)
+    max_pages: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("25"))
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class CrawlRun(Base):
+    __tablename__ = "crawl_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seed_id: Mapped[int] = mapped_column(ForeignKey("crawl_seeds.id", ondelete="CASCADE"))
+    operator_job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operator_jobs.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    started_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    pages_fetched: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    links_observed: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    error: Mapped[str | None] = mapped_column(Text)
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class SourcePage(Base):
+    __tablename__ = "source_pages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seed_id: Mapped[int | None] = mapped_column(ForeignKey("crawl_seeds.id", ondelete="SET NULL"))
+    url: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    host: Mapped[str] = mapped_column(String(253), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    topic: Mapped[str | None] = mapped_column(String(128))
+    quality_score: Mapped[float | None] = mapped_column(Numeric)
+    title: Mapped[str | None] = mapped_column(Text)
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    content_type: Mapped[str | None] = mapped_column(String(128))
+    etag: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32))
+    first_seen: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class LinkObservation(Base):
+    __tablename__ = "link_observations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_page_id: Mapped[int] = mapped_column(
+        ForeignKey("source_pages.id", ondelete="CASCADE")
+    )
+    candidate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("candidates.id", ondelete="SET NULL")
+    )
+    target_url: Mapped[str] = mapped_column(Text, nullable=False)
+    target_url_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+    target_domain: Mapped[str] = mapped_column(String(253), nullable=False)
+    anchor_text: Mapped[str | None] = mapped_column(Text)
+    context_text: Mapped[str | None] = mapped_column(Text)
+    semantic_location: Mapped[str | None] = mapped_column(String(32))
+    rel_flags: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    is_editorial: Mapped[bool | None] = mapped_column(Boolean)
+    is_sitewide: Mapped[bool | None] = mapped_column(Boolean)
+    target_http_status: Mapped[int | None] = mapped_column(Integer)
+    currently_live: Mapped[bool | None] = mapped_column(Boolean)
+    first_seen: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source_page_id", "target_url_hash"),
+        Index("ix_link_observations_target_domain", "target_domain", "last_seen"),
+    )
+
+
+class DeviceCredential(Base):
+    __tablename__ = "device_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PairingCode(Base):
+    __tablename__ = "pairing_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code_hash: Mapped[bytes] = mapped_column(LargeBinary(64), unique=True, nullable=False)
+    salt: Mapped[bytes] = mapped_column(LargeBinary(16), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OperatorJob(Base):
+    __tablename__ = "operator_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    active_key: Mapped[str | None] = mapped_column(String(128), unique=True)
+    created_by_device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("device_credentials.id", ondelete="SET NULL")
+    )
+    config_version: Mapped[int] = mapped_column(
+        ForeignKey("engine_config_versions.version"), nullable=False
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(String(128))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("ix_operator_jobs_state_created", "state", "created_at"),)
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+
+    worker_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("operator_jobs.id", ondelete="SET NULL"))
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    observed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class CandidateEvent(Base):
+    __tablename__ = "candidate_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    candidate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("candidates.id", ondelete="CASCADE")
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    config_version: Mapped[int | None] = mapped_column(
+        ForeignKey("engine_config_versions.version", ondelete="SET NULL")
+    )
+    actor_device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("device_credentials.id", ondelete="SET NULL")
+    )
+
+    __table_args__ = (Index("ix_candidate_events_created", "id", "created_at"),)
+
+
+class EventReadReceipt(Base):
+    """One receipt per event makes read state global across both Macs."""
+
+    __tablename__ = "event_read_receipts"
+
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("candidate_events.id", ondelete="CASCADE"), primary_key=True
+    )
+    device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("device_credentials.id", ondelete="SET NULL")
+    )
+    read_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class CandidateReview(Base):
+    __tablename__ = "candidate_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(128))
+    notes: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("device_credentials.id", ondelete="SET NULL")
+    )
+    reopens_review_id: Mapped[int | None] = mapped_column(
+        ForeignKey("candidate_reviews.id", ondelete="SET NULL")
+    )
+
+    __table_args__ = (Index("ix_candidate_reviews_candidate_decided", "candidate_id", "decided_at"),)
+
+
+class PortfolioOutcome(Base):
+    __tablename__ = "portfolio_outcomes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    occurred_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    amount_micros: Mapped[int | None] = mapped_column(BigInteger)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ProviderUsage(Base):
+    __tablename__ = "provider_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    cost_micros: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    occurred_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    candidate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("candidates.id", ondelete="SET NULL")
+    )
+    request_id: Mapped[str | None] = mapped_column(String(128))
+
+    __table_args__ = (Index("ix_provider_usage_provider_occurred", "provider", "occurred_at"),)
+
+
 __all__ = [
     "AvailabilityCheck",
     "Base",
     "Candidate",
+    "CandidateDossier",
+    "CandidateEvent",
+    "CandidateReview",
     "ClassificationRun",
+    "CrawlRun",
+    "CrawlSeed",
+    "DeviceCredential",
     "DiscoveryRun",
+    "EngineConfigVersion",
+    "EventReadReceipt",
+    "GateResult",
     "HttpObservation",
+    "LaneAssessment",
+    "LinkObservation",
     "MarketplaceListing",
+    "OperatorJob",
     "OpportunityAssessment",
     "Outcome",
+    "PairingCode",
+    "PortfolioOutcome",
+    "ProviderUsage",
     "RdapSnapshot",
     "RegistrarQuote",
     "ScoringWeights",
     "Source",
     "SourceMention",
+    "SourcePage",
     "SourceTerms",
     "WaybackSnapshot",
+    "WorkerHeartbeat",
     "metadata",
 ]

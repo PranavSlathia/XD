@@ -98,28 +98,6 @@ services:
     labels:
       autoheal: "true"
 
-  dh-worker-a2:
-    build: { context: ., dockerfile: Dockerfile.python }
-    container_name: dh-worker-a2
-    restart: unless-stopped
-    profiles: ["experimental"]
-    command: ["uv", "run", "python", "-m", "dh.workers.a2"]
-    env_file: .env
-    volumes:
-      - /var/data/dh:/var/data/dh
-    depends_on:
-      dh-pg: { condition: service_healthy }
-      dh-redis: { condition: service_healthy }
-    networks: [dh-net]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.a2' in cmd else 1)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    labels:
-      autoheal: "true"
-
   # Primary discovery path: official pending-delete inventory intersected with
   # a current authority dataset. Read-only; it cannot place bids or purchases.
   dh-worker-inventory:
@@ -181,26 +159,6 @@ services:
     labels:
       autoheal: "true"
 
-  dh-worker-classifier:
-    build: { context: ., dockerfile: Dockerfile.python }
-    container_name: dh-worker-classifier
-    restart: unless-stopped
-    profiles: ["experimental"]
-    command: ["uv", "run", "python", "-m", "dh.workers.classifier"]
-    env_file: .env
-    depends_on:
-      dh-pg: { condition: service_healthy }
-      dh-redis: { condition: service_healthy }
-    networks: [dh-net]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.classifier' in cmd else 1)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    labels:
-      autoheal: "true"
-
   dh-worker-scoring:
     build: { context: ., dockerfile: Dockerfile.python }
     container_name: dh-worker-scoring
@@ -213,6 +171,30 @@ services:
     networks: [dh-net]
     healthcheck:
       test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.scoring' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      autoheal: "true"
+
+  # Typed operator jobs and the bounded content crawler. This worker has no
+  # Docker socket and no shell-command API; every job kind is allowlisted in
+  # Python and claimed from Postgres with SKIP LOCKED.
+  dh-worker-operator:
+    build: { context: ., dockerfile: Dockerfile.python }
+    container_name: dh-worker-operator
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "dh.workers.operator"]
+    env_file: .env
+    mem_limit: 256m
+    cpus: 0.35
+    depends_on:
+      dh-pg: { condition: service_healthy }
+      dh-redis: { condition: service_healthy }
+    networks: [dh-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes().decode(); sys.exit(0 if 'dh.workers.operator' in cmd else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3

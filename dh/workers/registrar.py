@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dh.config import settings
 from dh.db.engine import session_scope
 from dh.db.models import Candidate, RegistrarQuote
+from dh.engine.assessments import assess_candidate
 from dh.logging import configure_logging, log
 from dh.sources.registrar.porkbun import RegistrarQuoteResult, quote_domain
 
@@ -47,18 +48,24 @@ async def _persist(session: AsyncSession, candidate_id: int, quote: RegistrarQuo
     session.add(
         RegistrarQuote(
             candidate_id=candidate_id,
+            observed_at=quote.observed_at,
             registrar=quote.registrar,
             is_premium=quote.is_premium,
             quote_price_micros=quote.quote_price_micros,
             renewal_price_micros=quote.renewal_price_micros,
             quote_currency=quote.currency,
             api_cost_micros=quote.api_cost_micros,
+            availability_status=quote.availability_status,
+            price_class=quote.price_class,
+            expires_at=quote.expires_at,
             raw_response=quote.raw_response,
         )
     )
     cand = await session.get(Candidate, candidate_id)
     if cand is not None:
         cand.score_version = None
+        await session.flush()
+        await assess_candidate(session, cand)
 
 
 async def run_batch(*, batch_size: int) -> int:

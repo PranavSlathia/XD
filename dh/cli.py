@@ -14,76 +14,21 @@ import typer
 from sqlalchemy import text
 
 from dh.config import settings
-from dh.db.engine import get_engine
-from dh.logging import configure_logging, log
+from dh.db.engine import get_engine, session_scope
+from dh.logging import configure_logging
 from dh.score import normalize
-from dh.spikes.a2 import SpikeConfig, run_a2_spike
+from dh.security.device_auth import create_pairing_code
 
 configure_logging()
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
-spike_app = typer.Typer(help="Phase-0.5 spike harnesses.")
 db_app = typer.Typer(help="Database helpers (no destructive ops).")
 score_app = typer.Typer(help="Scoring + normalization utilities.")
+device_app = typer.Typer(help="Pair and revoke private XD devices.")
 
-app.add_typer(spike_app, name="spike")
 app.add_typer(db_app, name="db")
 app.add_typer(score_app, name="score")
-
-
-@spike_app.command("a2")
-def spike_a2_cmd(
-    n_repos: int = typer.Option(1000, help="How many repos to sample."),
-    star_floor: int = typer.Option(5000, help="Minimum star count to consider."),
-    pushed_before: str = typer.Option(
-        "",
-        help="ISO date 'YYYY-MM-DD'. Restrict to repos last pushed before this.",
-    ),
-    extra_query: str = typer.Option(
-        "",
-        "--query",
-        help="Raw GitHub-search qualifier appended to the query, e.g. 'awesome in:name'.",
-    ),
-    persist: bool = typer.Option(
-        True,
-        "--persist/--no-persist",
-        help="Write results to the DB. Default true. Use --no-persist for quick iterations.",
-    ),
-    dry_run: bool = typer.Option(
-        True,
-        help="Skip live external calls (default in scaffold mode).",
-    ),
-) -> None:
-    """Run the Phase 0.5 A2 yield spike."""
-    cfg = SpikeConfig(
-        n_repos=n_repos,
-        star_floor=star_floor,
-        pushed_before=pushed_before or None,
-        extra_query=extra_query or None,
-        persist=persist,
-    )
-    log.info(
-        "spike.a2.start",
-        n_repos=n_repos,
-        star_floor=star_floor,
-        pushed_before=pushed_before or None,
-        extra_query=extra_query or None,
-        persist=persist,
-        dry_run=dry_run,
-    )
-
-    if dry_run:
-        typer.echo(
-            "dry-run: scaffold mode. No external calls made. "
-            "Pass `--no-dry-run` once env + Docker + BQ creds are wired up."
-        )
-        raise typer.Exit(code=0)
-
-    try:
-        asyncio.run(run_a2_spike(cfg))
-    except NotImplementedError as e:
-        log.error("spike.a2.not_implemented", error=str(e))
-        raise typer.Exit(code=1) from None
+app.add_typer(device_app, name="device")
 
 
 @db_app.command("check")
@@ -127,6 +72,20 @@ def score_normalize_demo() -> None:
         "age(years=20)": normalize.normalize_age(20),
     }
     typer.echo(json.dumps({k: round(v, 1) for k, v in samples.items()}, indent=2))
+
+
+@device_app.command("pairing-code")
+def device_pairing_code(
+    ttl_minutes: int = typer.Option(10, min=1, max=60, help="One-time code lifetime."),
+) -> None:
+    """Generate a one-time code on the private server for an XD Mac."""
+
+    async def _create() -> str:
+        async with session_scope() as session:
+            code, _row = await create_pairing_code(session, ttl_minutes=ttl_minutes)
+            return code
+
+    typer.echo(asyncio.run(_create()))
 
 
 @app.callback()

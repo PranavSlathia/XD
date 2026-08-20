@@ -1,7 +1,8 @@
-# Domain Hunter — always-on acquisition research contract
+# Domain Hunter — historical single-funnel operating contract
 
-> Current source of truth as of 2026-08-20. This supersedes the old dashboard,
-> 20–50-candidates-per-day, GitHub-first, and CZDS-first plans.
+> **Historical record.** This describes the deployed pre-XD pipeline retained
+> for migration and Vulture parity. `docs/XD-PRD.md` is the current source of
+> truth. Where the two differ, the XD PRD wins.
 
 ## Outcome
 

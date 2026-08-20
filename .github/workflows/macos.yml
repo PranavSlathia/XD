@@ -1,0 +1,52 @@
+name: Build XD macOS app
+
+on:
+  push:
+    paths:
+      - 'apps/macos/**'
+      - '.github/workflows/macos.yml'
+  pull_request:
+    paths:
+      - 'apps/macos/**'
+      - '.github/workflows/macos.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-bundle:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+
+      - name: Test Swift package
+        working-directory: apps/macos/XD
+        run: swift test
+
+      - name: Build universal personal bundle
+        working-directory: apps/macos/XD
+        run: ./scripts/build-app.sh
+
+      - name: Confirm architectures and safety boundary
+        working-directory: apps/macos/XD
+        run: |
+          lipo -archs dist/XD.app/Contents/MacOS/XD | grep -q arm64
+          lipo -archs dist/XD.app/Contents/MacOS/XD | grep -q x86_64
+          if grep -RniE '/purchase|/register|/bid|/backorder|docker.sock|Process\(' Sources; then
+            echo 'Forbidden client capability found.'
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XD-macOS-universal
+          path: apps/macos/XD/dist/XD.app
+          if-no-files-found: error
+

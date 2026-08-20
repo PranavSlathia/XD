@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     env: Literal["dev", "prod"] = "dev"
     project_root: Path = Field(default_factory=Path.cwd)
+    api_v1_auth_required: bool = True
+    api_public_base_url: str = "https://prsnl.tail625ab9.ts.net"
 
     # --- Discord operator surface (Vulture) ---
     discord_webhook_url: str = ""
@@ -49,6 +51,7 @@ class Settings(BaseSettings):
     whoisjson_daily_cap: int = 33
     whoisfreaks_daily_cap: int = 15
     bigquery_max_bytes_billed: int = 10 * 1024**3  # 10 GB
+    paid_enrichment_monthly_cap_micros: int = 25_000_000
 
     # --- LLM transport ---
     classifier_transport: Literal["codex_cli", "anthropic_api", "openai_api", "stub"] = "stub"
@@ -67,14 +70,20 @@ class Settings(BaseSettings):
     # --- DomCop Open PageRank ---
     openpagerank_api_key: str = ""
 
+    # --- DataForSEO pilot provider (read-only evidence) ---
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+
     # --- Continuous expiring-inventory discovery ---
     inventory_data_dir: Path = Path("/var/data/dh")
     inventory_interval_hours: int = 6
-    inventory_tlds: str = "com"
+    inventory_tlds: str = "com,net,org,co,io,ai"
     inventory_min_opr: float = 2.5
     inventory_min_referring_domains: int = 10
     inventory_max_candidates: int = 500
     inventory_detail_limit: int = 150
+    name_inventory_candidate_limit: int = 1000
+    name_screen_min_score: float = 65.0
     inventory_reference_refresh_days: int = 30
     namebio_retail_stats_refresh_hours: int = 24
     opportunity_research_threshold: float = 45.0
@@ -116,6 +125,11 @@ class Settings(BaseSettings):
 
     registrar_batch_size: int = 10
     registrar_interval_minutes: int = 60
+
+    operator_job_interval_seconds: int = 5
+    operator_worker_name: str = "dh-worker-operator"
+    event_poll_interval_seconds: float = 2.0
+    event_keepalive_seconds: float = 15.0
 
     # --- Sentry / GlitchTip ---
     sentry_dsn: str = ""

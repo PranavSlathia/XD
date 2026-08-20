@@ -30,6 +30,7 @@ from dh.db.models import (
     OpportunityAssessment,
     SourceTerms,
 )
+from dh.engine.inventory_promotion import persist_inventory_lanes, screen_name_inventory
 from dh.logging import configure_logging, log
 from dh.opportunity import MODEL_VERSION, AssessmentInput, assess
 from dh.sources.marketplace.dropcatch import (
@@ -415,7 +416,20 @@ async def run_once(*, detail_concurrency: int = 4) -> int:
     run_id = await _start_run()
     observed_at = _utcnow()
     try:
-        feed = await fetch_pending_delete_feed(allowed_tlds=_allowed_tlds(settings.inventory_tlds))
+        feed = await fetch_pending_delete_feed(
+            allowed_tlds=_allowed_tlds(settings.inventory_tlds),
+            min_sld_length=2,
+            max_sld_length=24,
+        )
+        # Name Assets are evaluated across the complete clean inventory before
+        # any authority intersection. Backlink evidence is intentionally absent
+        # from this screen.
+        name_candidates = await asyncio.to_thread(
+            screen_name_inventory,
+            feed.listings,
+            minimum_score=settings.name_screen_min_score,
+            limit=settings.name_inventory_candidate_limit,
+        )
         dataset = await ensure_top_domains_dataset(
             settings.inventory_data_dir,
             refresh_after_days=settings.inventory_reference_refresh_days,
@@ -482,7 +496,14 @@ async def run_once(*, detail_concurrency: int = 4) -> int:
 
         async with session_scope() as session:
             await _upsert_source_terms(session)
-            persisted = await _persist_matches(
+            lane_counts = await persist_inventory_lanes(
+                session,
+                name_candidates=name_candidates,
+                authority_records=records,
+                feed_by_domain=feed_by_domain,
+                observed_at=observed_at,
+            )
+            authority_persisted = await _persist_matches(
                 session,
                 records=records,
                 feed_by_domain=feed_by_domain,
@@ -490,6 +511,10 @@ async def run_once(*, detail_concurrency: int = 4) -> int:
                 market_by_domain=market_by_domain,
                 authority_cohort_sizes=authority_cohort_sizes,
                 observed_at=observed_at,
+            )
+            persisted = len(
+                {item.listing.domain for item in name_candidates}
+                | {record.domain for record in records}
             )
             run = await session.get(DiscoveryRun, run_id)
             if run is None:
@@ -507,6 +532,11 @@ async def run_once(*, detail_concurrency: int = 4) -> int:
                 "market_reference_version": market_version,
                 "market_reference_refreshed": market_refreshed,
                 "market_matches": len(market_by_domain),
+                "name_inventory_evaluated": len(feed.listings),
+                "name_lane_candidates": lane_counts["name"],
+                "authority_lane_candidates": lane_counts["authority"],
+                "lane_promotions": lane_counts["promoted"],
+                "legacy_authority_records_persisted": authority_persisted,
                 "market_error": market_error,
                 "authority_anomaly_candidates": sum(
                     size >= 5 for size in authority_cohort_sizes.values()
@@ -532,6 +562,7 @@ async def run_once(*, detail_concurrency: int = 4) -> int:
             prefiltered=len(feed.listings),
             matched=len(records),
             persisted=persisted,
+            name_candidates=len(name_candidates),
             detail_failed=len(detail_errors),
         )
         return persisted
