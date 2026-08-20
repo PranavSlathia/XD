@@ -101,6 +101,19 @@ public struct LinkEvidence: Codable, Identifiable, Equatable, Sendable {
     public let isEditorial: Bool?
     public let currentlyLive: Bool?
     public let lastSeen: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceURL = "sourceUrl"
+        case sourceDomain
+        case targetURL = "targetUrl"
+        case anchorText
+        case contextText
+        case semanticLocation
+        case relFlags
+        case isEditorial
+        case currentlyLive
+        case lastSeen
+    }
 }
 
 public struct RegistrarQuote: Codable, Identifiable, Equatable, Sendable {
@@ -220,4 +233,3 @@ public struct PairingResult: Codable, Equatable, Sendable {
     public let deviceName: String
     public let token: String
 }
-
